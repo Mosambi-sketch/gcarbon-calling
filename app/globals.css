@@ -50,19 +50,33 @@ html, body {
   overflow: hidden;
 }
 
-/* Sidebar pill */
-.sidebar {
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
-  background: var(--black);
-  border-radius: 0 32px 32px 0;
+/* Fluid Sidebar with Organic S-curve notch */
+.fluid-sidebar {
+  position: relative;
+  width: 68px;
+  min-width: 68px;
+  height: calc(100vh - 32px);
+  margin: 16px 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  user-select: none;
+}
+
+.sidebar-content {
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px 0;
-  position: relative;
-  z-index: 50;
-  gap: 4px;
+  justify-content: space-between;
+  padding: 16px 0 14px;
+}
+
+.sidebar-logo-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
 }
 
 .sidebar-logo {
@@ -73,74 +87,94 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 24px;
   font-weight: 800;
   font-size: 18px;
   color: var(--black);
-  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(217, 245, 107, 0.35);
+  transition: transform 0.2s ease;
 }
 
-.sidebar-nav {
+.sidebar-logo:hover {
+  transform: scale(1.05);
+}
+
+.sidebar-nav-list {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
 }
 
-.sidebar-item {
+.fluid-nav-item {
   position: relative;
   width: 100%;
+  height: 50px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 0;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
-.sidebar-item .icon-wrap {
-  width: 44px;
-  height: 44px;
+.fluid-nav-item .icon-slot {
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255,255,255,0.5);
+  color: rgba(255, 255, 255, 0.7);
   transition: all 0.2s ease;
 }
 
-.sidebar-item:hover .icon-wrap {
-  color: white;
-  background: rgba(255,255,255,0.1);
+.fluid-nav-item:hover .icon-slot {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.12);
 }
 
-.sidebar-item.active .icon-wrap {
-  background: white;
-  color: var(--black);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-  transform: scale(1.05);
+.sidebar-bottom-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
 
-/* Elegant active indicator on the left */
-.sidebar-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3.5px;
-  height: 22px;
-  background: var(--lime);
-  border-radius: 0 4px 4px 0;
-  box-shadow: 0 0 8px rgba(217, 245, 107, 0.5);
+.sidebar-avatar-wrap {
+  position: relative;
+}
+
+.user-face-disc {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.user-face-disc:hover {
+  transform: scale(1.06);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.fluid-logout-btn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fluid-logout-btn:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* Tooltip */
 .sidebar-tooltip {
   position: absolute;
-  left: calc(100% + 12px);
+  left: calc(100% + 14px);
   top: 50%;
   transform: translateY(-50%) translateX(-4px);
   background: #18181B;
@@ -169,8 +203,9 @@ html, body {
   border-left: none;
 }
 
-.sidebar-item:hover .sidebar-tooltip,
-.avatar-wrap:hover .sidebar-tooltip {
+.fluid-nav-item:hover .sidebar-tooltip,
+.sidebar-avatar-wrap:hover .sidebar-tooltip,
+.fluid-logout-btn:hover .sidebar-tooltip {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
 }

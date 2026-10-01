@@ -7,14 +7,18 @@ export interface User {
   name: string
   role: Role
   avatar_color?: string
+  avatar?: string
 }
 
 export const TEAM_MEMBERS = [
-  { name: 'Ajinkya', email: 'ajinkya@gcarbon.in', role: 'admin' as Role, color: '#D9F56B' },
-  { name: 'Himanshi', email: 'himanshi@gcarbon.in', role: 'caller' as Role, color: '#F9E1D2' },
-  { name: 'Tamanna', email: 'tamanna@gcarbon.in', role: 'caller' as Role, color: '#E8894F' },
+  { name: 'Ajinkya', email: 'ajinkya@gcarbon.in', role: 'admin' as Role, color: '#D9F56B', avatar: '/avatars/ajinkya-face.png' },
+  { name: 'Himanshi', email: 'himanshi@gcarbon.in', role: 'caller' as Role, color: '#F9E1D2', avatar: '/avatars/himanshi-face.jpg' },
+  { name: 'Tamanna', email: 'tamanna@gcarbon.in', role: 'caller' as Role, color: '#E8894F', avatar: '/avatars/tamanna-face.jpg' },
+  { name: 'Ankesh', email: 'ankesh@gcarbon.in', role: 'caller' as Role, color: '#93C5FD', avatar: '/avatars/ankesh-face.jpg' },
+  { name: 'Aadarsh', email: 'aadarsh@gcarbon.in', role: 'admin' as Role, color: '#A7F3D0', avatar: '/avatars/aadarsh-face.jpg' },
+  { name: 'Naresh', email: 'naresh@gcarbon.in', role: 'caller' as Role, color: '#FDE047', avatar: '/avatars/naresh-face.jpg' },
+  { name: 'Pranita', email: 'pranita@gcarbon.in', role: 'caller' as Role, color: '#F472B6', avatar: '/avatars/pranita-face.jpg' },
   { name: 'Kunal', email: 'kunal@gcarbon.in', role: 'caller' as Role, color: '#C4B5FD' },
-  { name: 'Ankesh', email: 'ankesh@gcarbon.in', role: 'caller' as Role, color: '#93C5FD' },
 ]
 
 export const LISTS = [
@@ -188,6 +192,22 @@ export const AVATAR_COLORS: Record<string, string> = {
   'Tamanna': '#E8894F',
   'Kunal': '#C4B5FD',
   'Ankesh': '#93C5FD',
+  'Aadarsh': '#A7F3D0',
+  'Naresh': '#FDE047',
+  'Pranita': '#F472B6',
+}
+
+export function getAvatar(name: string): string | undefined {
+  if (!name) return undefined
+  const norm = name.toLowerCase()
+  if (norm.includes('ajinkya')) return '/avatars/ajinkya-face.png'
+  if (norm.includes('himanshi')) return '/avatars/himanshi-face.jpg'
+  if (norm.includes('tamanna')) return '/avatars/tamanna-face.jpg'
+  if (norm.includes('ankesh')) return '/avatars/ankesh-face.jpg'
+  if (norm.includes('aadarsh')) return '/avatars/aadarsh-face.jpg'
+  if (norm.includes('naresh')) return '/avatars/naresh-face.jpg'
+  if (norm.includes('pranita')) return '/avatars/pranita-face.jpg'
+  return undefined
 }
 
 export function getAvatarColor(name: string): string {

@@ -47,23 +47,32 @@ export interface AppUser {
   role: 'admin' | 'caller'
   color: string
   password: string
+  avatar?: string
 }
 
 export const DEFAULT_USERS: AppUser[] = [
-  { id: 'user-ajinkya', email: 'ajinkya@gcarbon.in', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: 'gcarbon123' },
-  { id: 'user-himanshi', email: 'himanshi@gcarbon.in', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123' },
-  { id: 'user-tamanna', email: 'tamanna@gcarbon.in', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123' },
+  { id: 'user-ajinkya', email: 'ajinkya@gcarbon.in', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
+  { id: 'user-himanshi', email: 'himanshi@gcarbon.in', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123', avatar: '/avatars/himanshi-face.jpg' },
+  { id: 'user-tamanna', email: 'tamanna@gcarbon.in', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123', avatar: '/avatars/tamanna-face.jpg' },
+  { id: 'user-ankesh', email: 'ankesh@gcarbon.in', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: 'gcarbon123', avatar: '/avatars/ankesh-face.jpg' },
+  { id: 'user-aadarsh', email: 'aadarsh@gcarbon.in', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: 'gcarbon123', avatar: '/avatars/aadarsh-face.jpg' },
+  { id: 'user-naresh', email: 'naresh@gcarbon.in', name: 'Naresh', role: 'caller', color: '#FDE047', password: 'gcarbon123', avatar: '/avatars/naresh-face.jpg' },
+  { id: 'user-pranita', email: 'pranita@gcarbon.in', name: 'Pranita', role: 'caller', color: '#F472B6', password: 'gcarbon123', avatar: '/avatars/pranita-face.jpg' },
   { id: 'user-kunal', email: 'kunal@gcarbon.in', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: 'gcarbon123' },
-  { id: 'user-ankesh', email: 'ankesh@gcarbon.in', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: 'gcarbon123' },
 ]
 
 export function getUsers(): AppUser[] {
   const stored = load<AppUser>(KEYS.users)
+  const base = stored.length === 0 ? DEFAULT_USERS : stored
+  // Enrich with avatars if missing
+  const enriched = base.map(u => {
+    const avatar = u.avatar || DEFAULT_USERS.find(d => d.email.toLowerCase() === u.email.toLowerCase())?.avatar
+    return { ...u, avatar }
+  })
   if (stored.length === 0) {
-    save(KEYS.users, DEFAULT_USERS)
-    return DEFAULT_USERS
+    save(KEYS.users, enriched)
   }
-  return stored
+  return enriched
 }
 
 export function login(email: string, password: string): AppUser | null {
@@ -74,7 +83,12 @@ export function login(email: string, password: string): AppUser | null {
 export function getCurrentUser(): AppUser | null {
   if (typeof window === 'undefined') return null
   const raw = localStorage.getItem(KEYS.current_user)
-  return raw ? JSON.parse(raw) : null
+  if (!raw) return null
+  try {
+    const user: AppUser = JSON.parse(raw)
+    const avatar = user.avatar || DEFAULT_USERS.find(d => d.email.toLowerCase() === user.email.toLowerCase())?.avatar
+    return { ...user, avatar }
+  } catch { return null }
 }
 
 export function setCurrentUser(user: AppUser | null): void {

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import type { AppUser } from '@/lib/store'
 import { getContacts, getCallLogs, addCallLog, addTask, addEvent } from '@/lib/store'
 import type { Contact, CallLog, OutcomeType } from '@/lib/types'
-import { OUTCOMES, getAvatarColor, getInitials } from '@/lib/types'
+import { OUTCOMES, getAvatarColor, getInitials, getAvatar } from '@/lib/types'
 import { format, addDays } from 'date-fns'
 
 interface Row {
@@ -350,7 +350,16 @@ export default function LogCallDrawer({
                           <span style={{ fontSize: 11, color: '#AAA' }}>
                             {format(new Date(log.called_at), 'dd MMM, hh:mm a')}
                           </span>
-                          <span style={{ fontSize: 11, color: '#888' }}>by {log.caller_name}</span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+                            {getAvatar(log.caller_name) && (
+                              <img
+                                src={getAvatar(log.caller_name)}
+                                alt={log.caller_name}
+                                style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover' }}
+                              />
+                            )}
+                            <span style={{ fontSize: 11, color: '#888' }}>{log.caller_name}</span>
+                          </div>
                         </div>
                         {log.remark && (
                           <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{log.remark}</div>

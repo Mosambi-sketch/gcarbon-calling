@@ -6,7 +6,7 @@ import {
   addTask, addEvent, getUserByName, getUserById, getUsers, isSeeded
 } from '@/lib/store'
 import type { Company, Contact, CallLog, OutcomeType } from '@/lib/types'
-import { OUTCOMES, getStatusColor, getInitials, getAvatarColor } from '@/lib/types'
+import { OUTCOMES, getStatusColor, getInitials, getAvatarColor, getAvatar } from '@/lib/types'
 import { format, addDays, isToday, isPast } from 'date-fns'
 import LogCallDrawer from '../LogCallDrawer'
 
@@ -323,14 +323,24 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                           <a
                             href={`tel:${row.primaryContact.phones[0]}`}
                             onClick={e => e.stopPropagation()}
-                            style={{ fontSize: 12, color: '#0B0B0B', textDecoration: 'none', fontWeight: 500 }}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              fontSize: 12, color: '#0B0B0B', textDecoration: 'none', fontWeight: 600,
+                              background: '#F5F5F5', padding: '3px 8px', borderRadius: 6,
+                              transition: 'all 0.15s ease',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#E8F5D8'; e.currentTarget.style.color = '#15803D' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = '#F5F5F5'; e.currentTarget.style.color = '#0B0B0B' }}
                           >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            </svg>
                             {row.primaryContact.phones[0]}
                           </a>
                           <button
                             onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(row.primaryContact!.phones[0]) }}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#AAA', fontSize: 12 }}
-                            title="Copy"
+                            title="Copy number"
                           >
                             📋
                           </button>
@@ -364,14 +374,22 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                     <td>
                       {row.lastLog?.caller_name ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{
-                            width: 22, height: 22, borderRadius: '50%',
-                            background: getAvatarColor(row.lastLog.caller_name),
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 9, fontWeight: 700, color: '#0B0B0B',
-                          }}>
-                            {getInitials(row.lastLog.caller_name)}
-                          </div>
+                          {getAvatar(row.lastLog.caller_name) ? (
+                            <img
+                              src={getAvatar(row.lastLog.caller_name)}
+                              alt={row.lastLog.caller_name}
+                              style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', border: '1px solid #E5E5E5' }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: 22, height: 22, borderRadius: '50%',
+                              background: getAvatarColor(row.lastLog.caller_name),
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 9, fontWeight: 700, color: '#0B0B0B',
+                            }}>
+                              {getInitials(row.lastLog.caller_name)}
+                            </div>
+                          )}
                           <span style={{ fontSize: 12 }}>{row.lastLog.caller_name}</span>
                         </div>
                       ) : '—'}
@@ -394,11 +412,37 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                     </td>
                     <td>
                       <button
-                        className="btn btn-primary btn-sm"
+                        className="btn btn-sm"
+                        style={{
+                          background: '#0B0B0B',
+                          color: '#FFFFFF',
+                          borderRadius: 8,
+                          padding: '5px 10px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          border: 'none',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.background = '#D9F56B'
+                          e.currentTarget.style.color = '#0B0B0B'
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.background = '#0B0B0B'
+                          e.currentTarget.style.color = '#FFFFFF'
+                        }}
                         onClick={e => { e.stopPropagation(); setSelectedRow(row); setDrawerOpen(true) }}
                         title="Log call (L)"
                       >
-                        📞
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                          <path d="M14 2a8 8 0 0 1 8 8" />
+                        </svg>
+                        <span>Log</span>
                       </button>
                     </td>
                   </tr>

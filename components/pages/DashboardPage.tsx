@@ -4,7 +4,7 @@ import type { AppUser } from '@/lib/store'
 import { getDashboardMetrics, getCompanies, getCallLogs, getTasks, getNotes, getUsers } from '@/lib/store'
 import type { NavPage } from '../AppShell'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import { getInitials } from '@/lib/types'
+import { getInitials, getAvatar } from '@/lib/types'
 import { format } from 'date-fns'
 
 const PIE_COLORS = ['#D9F56B', '#E8894F', '#0B0B0B', '#93C5FD', '#C4B5FD', '#F9E1D2', '#DCFCE7', '#FEE2E2']
@@ -82,8 +82,12 @@ function LeaderboardCard({ data }: { data: ReturnType<typeof getDashboardMetrics
           }}>
             {i + 1}
           </div>
-          <div className="avatar" style={{ background: m.color, color: '#0B0B0B', fontSize: 11 }}>
-            {getInitials(m.name)}
+          <div className="avatar" style={{ background: m.color, color: '#0B0B0B', fontSize: 11, overflow: 'hidden' }}>
+            {getAvatar(m.name) ? (
+              <img src={getAvatar(m.name)} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              getInitials(m.name)
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 13 }}>{m.name}</div>

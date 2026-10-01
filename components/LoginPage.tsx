@@ -141,30 +141,44 @@ export default function LoginPage({ onLogin }: { onLogin: (u: AppUser) => void }
           </form>
 
           <div style={{ marginTop: 20, padding: 14, background: '#F9F9F9', borderRadius: 12 }}>
-            <div style={{ fontSize: 11, color: '#888', fontWeight: 600, marginBottom: 8 }}>DEMO ACCOUNTS</div>
-            {[
-              { name: 'Ajinkya (Admin)', email: 'ajinkya@gcarbon.in' },
-              { name: 'Himanshi', email: 'himanshi@gcarbon.in' },
-              { name: 'Kunal', email: 'kunal@gcarbon.in' },
-            ].map(u => (
-              <button
-                key={u.email}
-                onClick={() => { setEmail(u.email); setPassword('gcarbon123') }}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '6px 10px', borderRadius: 8, border: 'none',
-                  background: 'transparent', cursor: 'pointer',
-                  fontSize: 12, color: '#555', fontFamily: 'inherit',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#F0F0F0')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                <span style={{ fontWeight: 600 }}>{u.name}</span>
-                <span style={{ color: '#AAA', marginLeft: 8 }}>{u.email}</span>
-              </button>
-            ))}
-            <div style={{ fontSize: 11, color: '#AAA', marginTop: 8 }}>Password: gcarbon123</div>
+            <div style={{ fontSize: 11, color: '#888', fontWeight: 600, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+              <span>SELECT TEAM MEMBER</span>
+              <span style={{ color: '#AAA', fontWeight: 400 }}>Pass: gcarbon123</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 180, overflowY: 'auto' }}>
+              {[
+                { name: 'Ajinkya (Admin)', email: 'ajinkya@gcarbon.in', avatar: '/avatars/ajinkya-face.png' },
+                { name: 'Himanshi', email: 'himanshi@gcarbon.in', avatar: '/avatars/himanshi-face.jpg' },
+                { name: 'Tamanna', email: 'tamanna@gcarbon.in', avatar: '/avatars/tamanna-face.jpg' },
+                { name: 'Ankesh', email: 'ankesh@gcarbon.in', avatar: '/avatars/ankesh-face.jpg' },
+                { name: 'Aadarsh (Admin)', email: 'aadarsh@gcarbon.in', avatar: '/avatars/aadarsh-face.jpg' },
+                { name: 'Naresh', email: 'naresh@gcarbon.in', avatar: '/avatars/naresh-face.jpg' },
+                { name: 'Pranita', email: 'pranita@gcarbon.in', avatar: '/avatars/pranita-face.jpg' },
+              ].map(u => (
+                <button
+                  key={u.email}
+                  type="button"
+                  onClick={() => { setEmail(u.email); setPassword('gcarbon123') }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+                    padding: '6px 8px', borderRadius: 8, border: 'none',
+                    background: 'transparent', cursor: 'pointer',
+                    fontSize: 12, color: '#444', fontFamily: 'inherit',
+                    transition: 'background 0.12s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#ECECEC')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <img
+                    src={u.avatar}
+                    alt={u.name}
+                    style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' }}
+                  />
+                  <span style={{ fontWeight: 600 }}>{u.name}</span>
+                  <span style={{ color: '#999', marginLeft: 'auto', fontSize: 11 }}>{u.email.split('@')[0]}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

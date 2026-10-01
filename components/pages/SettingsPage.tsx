@@ -4,7 +4,7 @@ import type { AppUser } from '@/lib/store'
 import { getUsers, getLists, addList, clearAllData, markSeeded } from '@/lib/store'
 import { classifyOutcome, normalizePhones, parseExcelDate, parseSheet } from '@/lib/excel-importer'
 import { addCompany, addContact, addCallLog, checkDuplicateCompany } from '@/lib/store'
-import { outcomeToStatus } from '@/lib/types'
+import { outcomeToStatus, getAvatar } from '@/lib/types'
 import type { CompanyStatus } from '@/lib/types'
 
 export default function SettingsPage({ user }: { user: AppUser }) {
@@ -203,8 +203,20 @@ export default function SettingsPage({ user }: { user: AppUser }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {users.map(u => (
                 <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', background: '#F9F9F9', borderRadius: 14, border: '1px solid #F0F0F0' }}>
-                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: u.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14 }}>
-                    {u.name[0]}
+                  <div style={{
+                    width: 44, height: 44, borderRadius: '50%',
+                    background: u.color, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, fontSize: 14, overflow: 'hidden', border: '1px solid #E5E5E5'
+                  }}>
+                    {u.avatar || getAvatar(u.name) ? (
+                      <img
+                        src={u.avatar || getAvatar(u.name)}
+                        alt={u.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 20%' }}
+                      />
+                    ) : (
+                      u.name[0]
+                    )}
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600 }}>{u.name}</div>
