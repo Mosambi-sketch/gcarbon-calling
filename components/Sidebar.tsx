@@ -102,7 +102,7 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
       {/* Bottom: avatar + logout */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
         {/* Avatar */}
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative' }} className="avatar-wrap">
           <div
             style={{
               width: 44, height: 44,
@@ -117,21 +117,7 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
           >
             {getInitials(user.name)}
           </div>
-          <div style={{
-            position: 'absolute',
-            left: 52, top: '50%', transform: 'translateY(-50%)',
-            background: '#0B0B0B',
-            color: 'white',
-            padding: '6px 12px',
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 500,
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
-            opacity: 0,
-            transition: 'opacity 0.2s',
-            zIndex: 100,
-          }} className="avatar-tooltip">
+          <div className="sidebar-tooltip">
             {user.name} · {user.role}
           </div>
         </div>
