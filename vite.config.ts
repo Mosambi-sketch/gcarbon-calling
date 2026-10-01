@@ -11,7 +11,7 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use('/api/seed', (req, res) => {
           try {
-            const seedPath = path.resolve(__dirname, 'data/seed.json')
+            const seedPath = path.resolve(import.meta.dirname, 'data/seed.json')
             if (fs.existsSync(seedPath)) {
               const content = fs.readFileSync(seedPath, 'utf-8')
               res.setHeader('Content-Type', 'application/json')
@@ -30,7 +30,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './')
+      '@': path.resolve(import.meta.dirname, './')
     }
   },
   server: {

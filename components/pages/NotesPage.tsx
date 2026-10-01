@@ -12,6 +12,7 @@ export default function NotesPage({ user }: { user: AppUser }) {
   const [editTitle, setEditTitle] = useState('')
   const [editBody, setEditBody] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const loadNotes = useCallback(() => {
@@ -67,11 +68,12 @@ export default function NotesPage({ user }: { user: AppUser }) {
   const triggerSave = useCallback((title: string, body: string) => {
     if (!selectedNote) return
     clearTimeout(saveTimer.current)
+    setSaved(false)
     saveTimer.current = setTimeout(() => {
       setSaving(true)
       updateNote(selectedNote.id, { title, body })
       setNotes(getNotes(user.id))
-      setTimeout(() => setSaving(false), 500)
+      setTimeout(() => { setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000) }, 500)
     }, 800)
   }, [selectedNote, user.id])
 
@@ -96,7 +98,7 @@ export default function NotesPage({ user }: { user: AppUser }) {
       <div className="page-header">
         <div className="page-header-left">
           <div className="greeting" style={{ fontSize: 18 }}>My Notes</div>
-          <div className="greeting-sub">Private to you only</div>
+          <div className="greeting-sub">{notes.length} note{notes.length !== 1 ? 's' : ''} · Private to you only</div>
         </div>
         <button className="btn btn-primary" onClick={handleNewNote}>+ New Note</button>
       </div>
@@ -183,6 +185,7 @@ export default function NotesPage({ user }: { user: AppUser }) {
                 />
               </div>
               {saving && <span style={{ fontSize: 11, color: '#AAA' }}>Saving…</span>}
+              {!saving && saved && <span style={{ fontSize: 11, color: '#16A34A' }}>✓ Saved</span>}
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => handlePin(selectedNote)}

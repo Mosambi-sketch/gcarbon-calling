@@ -20,17 +20,36 @@ const PRIORITY_COLORS: Record<Priority, string> = {
 
 function TaskCard({ task, onUpdate, onDelete }: { task: Task; onUpdate: (id: string, data: Partial<Task>) => void; onDelete: (id: string) => void }) {
   const isOverdue = task.due_at && isPast(parseISO(task.due_at)) && task.status !== 'done'
+  const isDone = task.status === 'done'
   
   return (
-    <div className="kanban-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+    <div className="kanban-card" style={{ opacity: isDone ? 0.65 : 1 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 8 }}>
+        {/* Quick complete circle */}
+        <button
+          onClick={() => onUpdate(task.id, { status: isDone ? 'todo' : 'done' })}
+          style={{
+            width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+            border: `2px solid ${isDone ? '#16A34A' : '#DDD'}`,
+            background: isDone ? '#16A34A' : 'transparent',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.15s', marginTop: 1,
+          }}
+          title={isDone ? 'Mark as to-do' : 'Mark as done'}
+        >
+          {isDone && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          )}
+        </button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.3 }}>{task.title}</div>
+          <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.3, textDecoration: isDone ? 'line-through' : 'none', color: isDone ? '#AAA' : undefined }}>{task.title}</div>
           {task.description && (
             <div style={{ fontSize: 12, color: '#888', marginTop: 4, lineHeight: 1.4 }}>{task.description}</div>
           )}
         </div>
-        <div style={{ width: 8, height: 8, borderRadius: 2, background: PRIORITY_COLORS[task.priority], flexShrink: 0, marginLeft: 8, marginTop: 3 }} />
+        <div style={{ width: 8, height: 8, borderRadius: 2, background: PRIORITY_COLORS[task.priority], flexShrink: 0, marginTop: 5 }} />
       </div>
       
       {task.company_name && (
@@ -63,7 +82,7 @@ function TaskCard({ task, onUpdate, onDelete }: { task: Task; onUpdate: (id: str
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
+      <div style={{ display: 'flex', gap: 4, marginTop: 10, paddingTop: 8, borderTop: '1px solid #F5F5F5' }}>
         {COLUMNS.filter(c => c.id !== task.status).map(col => (
           <button
             key={col.id}

@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { AppUser } from '@/lib/store'
 import {
-  getCompanies, getContacts, getCallLogs, getLists, addCallLog, updateCompany,
+  getCompanies, getContacts, getCallLogs, getLists, addCallLog, addCompany, addContact,
   addTask, addEvent, getUserByName, getUserById, getUsers, isSeeded
 } from '@/lib/store'
 import type { Company, Contact, CallLog, OutcomeType } from '@/lib/types'
@@ -52,6 +52,14 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
   const [users, setUsers] = useState(getUsers())
   const [loading, setLoading] = useState(true)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Add Company modal state
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newCompany, setNewCompany] = useState({
+    name: '', contactName: '', phone: '', designation: '',
+    sector: '', location: '', listId: 'connection-list',
+  })
+  const [addingSaving, setAddingSaving] = useState(false)
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -166,6 +174,17 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
 
   const allStatuses = ['Not Called', 'In Progress', 'Follow-up Due', 'Meeting Set', 'Won/Interested', 'Dead']
 
+  const listCounts = useMemo(() => {
+    const all = getCompanies()
+    const counts: Record<string, number> = { all: all.length }
+    for (const c of all) {
+      counts[c.list_id] = (counts[c.list_id] || 0) + 1
+    }
+    return counts
+  }, [rows])
+
+  const activeFiltersCount = (search ? 1 : 0) + (filterStatus ? 1 : 0) + (filterCaller ? 1 : 0) + (filterFollowUp ? 1 : 0)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Header */}
@@ -173,7 +192,10 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="page-header-left">
             <div className="greeting" style={{ fontSize: 18 }}>Calling Sheet</div>
-            <div className="greeting-sub">{filtered.length} companies{search || filterStatus ? ' (filtered)' : ''}</div>
+            <div className="greeting-sub">
+              {filtered.length} {filtered.length === 1 ? 'company' : 'companies'}
+              {activeFiltersCount > 0 ? ` (filtered from ${rows.length})` : ''}
+            </div>
           </div>
           <button
             className="btn btn-lime"
@@ -182,7 +204,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           >
             ▶ Next to Call
           </button>
-          <button className="btn btn-primary" onClick={() => {/* TODO: add company modal */}}>
+          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             + Add Company
           </button>
         </div>
@@ -192,20 +214,59 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           <button
             className={`tab-item ${listId === 'all' ? 'active' : ''}`}
             onClick={() => setListId('all')}
-            style={{ background: listId === 'all' ? '#0B0B0B' : undefined, color: listId === 'all' ? 'white' : undefined, borderRadius: 20 }}
+            style={{
+              background: listId === 'all' ? '#0B0B0B' : undefined,
+              color: listId === 'all' ? 'white' : undefined,
+              borderRadius: 20,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6
+            }}
           >
-            All
+            <span>All</span>
+            <span style={{
+              fontSize: 11,
+              padding: '1px 6px',
+              borderRadius: 10,
+              background: listId === 'all' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)',
+              color: listId === 'all' ? '#fff' : '#666',
+              fontWeight: 500
+            }}>
+              {listCounts['all'] || 0}
+            </span>
           </button>
-          {lists.map(l => (
-            <button
-              key={l.id}
-              className={`tab-item ${listId === l.id ? 'active' : ''}`}
-              onClick={() => setListId(l.id)}
-              style={{ borderRadius: 20, whiteSpace: 'nowrap' }}
-            >
-              {l.name}
-            </button>
-          ))}
+          {lists.map(l => {
+            const count = listCounts[l.id] || 0
+            const isActive = listId === l.id
+            return (
+              <button
+                key={l.id}
+                className={`tab-item ${isActive ? 'active' : ''}`}
+                onClick={() => setListId(l.id)}
+                style={{
+                  borderRadius: 20,
+                  whiteSpace: 'nowrap',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: isActive ? '#0B0B0B' : undefined,
+                  color: isActive ? 'white' : undefined
+                }}
+              >
+                <span>{l.name}</span>
+                <span style={{
+                  fontSize: 11,
+                  padding: '1px 6px',
+                  borderRadius: 10,
+                  background: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)',
+                  color: isActive ? '#fff' : '#666',
+                  fontWeight: 500
+                }}>
+                  {count}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -250,11 +311,16 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           </select>
         </div>
 
-        {(filterStatus || filterCaller || filterFollowUp || search) && (
-          <button className="btn btn-ghost btn-sm" onClick={() => {
-            setFilterStatus(''); setFilterCaller(''); setFilterFollowUp(''); setSearch('')
-          }}>
-            Clear filters
+        {activeFiltersCount > 0 && (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              setFilterStatus(''); setFilterCaller(''); setFilterFollowUp(''); setSearch('')
+            }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#DC2626', background: '#FEE2E2', border: '1px solid #FECACA', fontWeight: 500 }}
+          >
+            <span>✕ Clear filters</span>
+            <span style={{ background: '#DC2626', color: '#fff', fontSize: 10, borderRadius: 10, padding: '1px 6px', fontWeight: 600 }}>{activeFiltersCount}</span>
           </button>
         )}
 
@@ -301,7 +367,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                 return (
                   <tr
                     key={row.company.id}
-                    className={isOverdue ? 'overdue-row' : ''}
+                    className={`${isOverdue ? 'overdue-row' : isDueToday ? 'followup-today-row' : row.company.status === 'Meeting Set' ? 'meeting-set-row' : ''}`}
                     onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
                     style={{ cursor: 'pointer' }}
                   >
@@ -461,6 +527,124 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           onClose={() => setDrawerOpen(false)}
           onSaved={handleLogSaved}
         />
+      )}
+
+      {/* Add Company Modal */}
+      {showAddModal && (
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="modal animate-fade-in" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>Add New Company</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Company Name *</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Tata Motors Ltd."
+                  value={newCompany.name}
+                  onChange={e => setNewCompany(p => ({ ...p, name: e.target.value }))}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Contact Person</label>
+                <input
+                  className="input"
+                  placeholder="Full name"
+                  value={newCompany.contactName}
+                  onChange={e => setNewCompany(p => ({ ...p, contactName: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Phone</label>
+                <input
+                  className="input"
+                  placeholder="+91 98765 43210"
+                  value={newCompany.phone}
+                  onChange={e => setNewCompany(p => ({ ...p, phone: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Designation</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Director"
+                  value={newCompany.designation}
+                  onChange={e => setNewCompany(p => ({ ...p, designation: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Sector / Industry</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Manufacturing"
+                  value={newCompany.sector}
+                  onChange={e => setNewCompany(p => ({ ...p, sector: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Location</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Pune, MH"
+                  value={newCompany.location}
+                  onChange={e => setNewCompany(p => ({ ...p, location: e.target.value }))}
+                />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#555', marginBottom: 6 }}>Add to List</label>
+                <div className="select-wrap" style={{ width: '100%' }}>
+                  <select
+                    value={newCompany.listId}
+                    onChange={e => setNewCompany(p => ({ ...p, listId: e.target.value }))}
+                    style={{ width: '100%' }}
+                  >
+                    {lists.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+              <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setShowAddModal(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, justifyContent: 'center' }}
+                disabled={!newCompany.name.trim() || addingSaving}
+                onClick={async () => {
+                  if (!newCompany.name.trim()) return
+                  setAddingSaving(true)
+                  const company = addCompany({
+                    name: newCompany.name.trim(),
+                    list_id: newCompany.listId,
+                    sector: newCompany.sector || undefined,
+                    industry: newCompany.sector || undefined,
+                    location: newCompany.location || undefined,
+                    reference: false,
+                    status: 'Not Called',
+                  })
+                  if (newCompany.contactName.trim()) {
+                    addContact({
+                      company_id: company.id,
+                      name: newCompany.contactName.trim(),
+                      designation: newCompany.designation || undefined,
+                      phones: newCompany.phone ? [newCompany.phone.trim()] : [],
+                      is_primary: true,
+                    })
+                  }
+                  await new Promise(r => setTimeout(r, 200))
+                  setNewCompany({ name: '', contactName: '', phone: '', designation: '', sector: '', location: '', listId: newCompany.listId })
+                  setAddingSaving(false)
+                  setShowAddModal(false)
+                  loadData()
+                  setListId(newCompany.listId)
+                }}
+              >
+                {addingSaving ? <span className="spinner" style={{ borderTopColor: 'white' }} /> : '+ Add Company'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

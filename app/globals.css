@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
-@import "tailwindcss";
 
 :root {
   --black: #0B0B0B;
@@ -700,13 +699,16 @@ html, body {
   background: var(--off-white);
   border: 1px solid #E8E8E8;
   border-radius: 10px;
-  padding: 7px 28px 7px 10px;
+  padding: 7px 30px 7px 10px;
   font-size: 12px;
   font-family: inherit;
   font-weight: 600;
   color: var(--black);
   cursor: pointer;
   outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
 }
 
 /* Tab pills */
@@ -1010,4 +1012,74 @@ html, body {
   box-shadow: 0 4px 16px rgba(0,0,0,0.1) !important;
   font-family: 'Plus Jakarta Sans', sans-serif !important;
   font-size: 12px !important;
+}
+
+/* Keyboard shortcut badges */
+kbd {
+  background: #F0F0F0;
+  border: 1px solid #DDD;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 600;
+  color: #555;
+}
+
+/* Follow-up due today highlight */
+.followup-today-row td {
+  background: rgba(253, 224, 71, 0.06);
+}
+.followup-today-row:hover td {
+  background: rgba(253, 224, 71, 0.12) !important;
+}
+
+/* Meeting set row */
+.meeting-set-row td {
+  background: rgba(217, 245, 107, 0.06);
+}
+.meeting-set-row:hover td {
+  background: rgba(217, 245, 107, 0.12) !important;
+}
+
+/* Modal slide-up animation */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal {
+  animation: slideUp 0.25s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+/* Active liquid circle glow */
+.active-liquid-circle {
+  box-shadow: 0 4px 18px rgba(0,0,0,0.14), 0 1px 3px rgba(0,0,0,0.08), 0 0 0 2px rgba(217,245,107,0.2);
+}
+
+/* Smooth page transition */
+.content-canvas > div {
+  animation: fadeIn 0.2s ease;
+}
+
+/* Improve metric card hover */
+.card[style*="cursor: pointer"]:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.10);
+  transform: translateY(-1px);
+  transition: all 0.2s ease;
+}
+
+/* Ensure overdue rows animate on load */
+@keyframes pulse-red {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(220, 38, 38, 0.04); }
+}
+.overdue-row td:first-child {
+  border-left: 3px solid #E8894F;
+}
+.followup-today-row td:first-child {
+  border-left: 3px solid #FCD34D;
+}
+.meeting-set-row td:first-child {
+  border-left: 3px solid #D9F56B;
 }

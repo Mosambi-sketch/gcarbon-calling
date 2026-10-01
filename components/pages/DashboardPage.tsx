@@ -4,8 +4,8 @@ import type { AppUser } from '@/lib/store'
 import { getDashboardMetrics, getCompanies, getCallLogs, getTasks, getNotes, getUsers } from '@/lib/store'
 import type { NavPage } from '../AppShell'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import { getInitials, getAvatar } from '@/lib/types'
-import { format } from 'date-fns'
+import { getInitials, getAvatar, getAvatarColor } from '@/lib/types'
+import { format, isPast, parseISO } from 'date-fns'
 
 const PIE_COLORS = ['#D9F56B', '#E8894F', '#0B0B0B', '#93C5FD', '#C4B5FD', '#F9E1D2', '#DCFCE7', '#FEE2E2']
 
@@ -74,17 +74,17 @@ function LeaderboardCard({ data }: { data: ReturnType<typeof getDashboardMetrics
       {data.map((m, i) => (
         <div key={m.name} className="leaderboard-item">
           <div style={{ 
-            width: 24, height: 24, 
+            width: 20, height: 20, 
             background: i === 0 ? '#D9F56B' : i === 1 ? '#E8E8E8' : '#F5F5F5',
             borderRadius: '50%',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 11, fontWeight: 700, flexShrink: 0,
+            fontSize: 10, fontWeight: 700, flexShrink: 0,
           }}>
             {i + 1}
           </div>
           <div className="avatar" style={{ background: m.color, color: '#0B0B0B', fontSize: 11, overflow: 'hidden' }}>
             {getAvatar(m.name) ? (
-              <img src={getAvatar(m.name)} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={getAvatar(m.name)} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 20%' }} />
             ) : (
               getInitials(m.name)
             )}
@@ -117,12 +117,14 @@ export default function DashboardPage({ user, onNavigate }: { user: AppUser; onN
   const [metrics, setMetrics] = useState<ReturnType<typeof getDashboardMetrics> | null>(null)
   const [tasks, setTasks] = useState<ReturnType<typeof getTasks>>([])
   const [notes, setNotes] = useState<ReturnType<typeof getNotes>>([])
+  const [totalCompanies, setTotalCompanies] = useState(0)
 
   useEffect(() => {
     const m = getDashboardMetrics(user.id, period)
     setMetrics(m)
     setTasks(getTasks(user.id).filter(t => t.status !== 'done').slice(0, 5))
     setNotes(getNotes(user.id).slice(0, 4))
+    setTotalCompanies(getCompanies().length)
   }, [user.id, period])
 
   const outcomeChartData = useMemo(() => {
@@ -154,12 +156,12 @@ export default function DashboardPage({ user, onNavigate }: { user: AppUser; onN
 
         {/* Row 1: Key metrics */}
         <div style={{ display: 'flex', gap: 12 }}>
-          <StatCard title="Calls today (me)" value={metrics.callsToday} icon="📞" />
+          <StatCard title="My calls today" value={metrics.callsToday} icon="📞" />
           <StatCard title="Team calls today" value={metrics.teamCallsToday} icon="👥" />
           <StatCard 
             title="Follow-ups due" 
             value={metrics.followUpsDueToday} 
-            sub={`${metrics.followUpsOverdue} overdue`}
+            sub={metrics.followUpsOverdue > 0 ? `⚠ ${metrics.followUpsOverdue} overdue` : undefined}
             bg={metrics.followUpsDueToday > 0 ? 'card-peach' : ''}
             icon="⏰"
             onClick={() => onNavigate('calling')}
@@ -172,10 +174,16 @@ export default function DashboardPage({ user, onNavigate }: { user: AppUser; onN
             onClick={() => onNavigate('calendar')}
           />
           <StatCard
-            title={`Conversion rate (${period}d)`}
+            title={`Conversion (${period}d)`}
             value={`${metrics.conversionRate}%`}
             bg={metrics.conversionRate > 20 ? 'card-lime' : ''}
             icon="📈"
+          />
+          <StatCard
+            title="Companies total"
+            value={totalCompanies.toLocaleString()}
+            icon="🏢"
+            onClick={() => onNavigate('calling')}
           />
         </div>
 
