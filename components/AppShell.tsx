@@ -23,17 +23,24 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
 
   useEffect(() => {
     let cancelled = false
+    const timeout = setTimeout(() => {
+      if (!cancelled) setWorkspaceReady(true)
+    }, 2500)
     async function initData() {
       try {
         await syncFromSupabase()
       } catch (error) {
-        console.error('Workspace initialization failed:', error)
+        console.error("Workspace initialization failed:", error)
       } finally {
+        clearTimeout(timeout)
         if (!cancelled) setWorkspaceReady(true)
       }
     }
     void initData()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
   }, [])
 
   useEffect(() => subscribeRealtime(), [])

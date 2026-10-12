@@ -9,13 +9,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './'),
-      'react': path.resolve(import.meta.dirname, './node_modules/react'),
-      'react-dom': path.resolve(import.meta.dirname, './node_modules/react-dom'),
     },
-    dedupe: ['react', 'react-dom']
+    dedupe: ['react', 'react-dom', 'lucide-react']
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client']
+    include: ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/client', 'lucide-react']
   },
   server: {
     port: 5173,
