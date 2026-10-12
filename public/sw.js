@@ -46,6 +46,8 @@ self.addEventListener('fetch', (event) => {
   // Network-first for API calls (Backend API, Supabase, Google Calendar, Vite)
   if (
     url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/auth') ||
+    url.pathname.includes('/auth/') ||
     url.pathname.startsWith('/@') ||
     url.hostname.includes('supabase.co') ||
     url.hostname.includes('googleapis.com') ||

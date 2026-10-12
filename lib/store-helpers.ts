@@ -1,6 +1,7 @@
 /**
  * lib/store-helpers.ts
- * Pure localStorage primitives shared by store.ts and db.ts
+ * In-memory client cache primitives shared by store.ts and db.ts.
+ * Supabase is the single source of truth; database records are not stored in localStorage.
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -21,19 +22,14 @@ export const KEYS = {
   current_user: 'gc_current_user',
 } as const
 
+const _memoryCache = new Map<string, unknown[]>()
+
 export function load<T>(key: string): T[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T[]) : []
-  } catch {
-    return []
-  }
+  return (_memoryCache.get(key) || []) as T[]
 }
 
 export function save<T>(key: string, data: T[]): void {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(key, JSON.stringify(data))
+  _memoryCache.set(key, data)
 }
 
 export function genId(): string {

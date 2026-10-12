@@ -210,7 +210,12 @@ function normalizeKey(str) {
  * Downloads the latest live Excel workbook from SharePoint
  */
 export async function downloadSharePointExcel(targetPath, sourceUrl = null) {
-  const cookieJar = path.resolve(rootDir, 'data/.sp_cookies.txt')
+  const cookieJar = process.env.SHAREPOINT_COOKIE_PATH || path.resolve(rootDir, 'data/.sp_cookies.txt')
+  if (process.env.SHAREPOINT_COOKIES && (!fs.existsSync(cookieJar) || fs.statSync(cookieJar).size === 0)) {
+    try {
+      fs.writeFileSync(cookieJar, process.env.SHAREPOINT_COOKIES, 'utf8')
+    } catch {}
+  }
   const tempPath = targetPath || path.resolve(rootDir, 'data/CRM.xlsx')
   const downloadUrl = normalizeSharePointUrl(sourceUrl || process.env.SHAREPOINT_EXCEL_URL || DEFAULT_SHAREPOINT_URL)
   

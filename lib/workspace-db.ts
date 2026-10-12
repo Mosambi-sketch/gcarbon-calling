@@ -6,7 +6,7 @@
  * syncing back to local storage cache so the UI stays instant and resilient.
  */
 
-import { supabase, isSupabaseReady } from './supabase'
+import { supabase } from './supabase'
 import { api } from './api'
 import { load, save, genId, KEYS } from './store-helpers'
 import type {
@@ -71,44 +71,16 @@ export async function logAudit(
     created_at: new Date().toISOString(),
   }
 
-  if (isSupabaseReady) {
-    try {
-      await supabase.from('audit_logs').insert(entry)
+  try {
+    await supabase.from('audit_logs').insert(entry)
     } catch (err) {
       console.warn('Failed to insert audit log in Supabase:', err)
     }
-  }
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
 
 export async function fetchWorkspaces(): Promise<Result<Workspace[]>> {
-  if (!isSupabaseReady) {
-    const local = load<Workspace>(KEYS.workspaces)
-    if (local.length === 0) {
-      // Seed from existing lists if any
-      const legacyLists = load<{ id: string; name: string; type: 'company' | 'freelancer'; created_at: string; columns?: string[] }>(KEYS.lists)
-      if (legacyLists.length > 0) {
-        const migrated: Workspace[] = legacyLists.map(l => ({
-          id: l.id,
-          name: l.name,
-          type: l.type,
-          created_at: l.created_at,
-          archived: false,
-          columns: l.columns || [],
-        }))
-        save(KEYS.workspaces, migrated)
-        return { data: migrated, error: null }
-      }
-    }
-    return {
-      data: local.filter(
-        w => !w.archived && !['connection-list', 'cold-calling-1', 'cold-calling-2', 'new-list', 'data-centres', 'kharadi', 'ranjangaon', 'bhosari', 'chakan', 'freelancers'].includes(w.id) && w.name.toLowerCase() !== 'connection list'
-      ),
-      error: null,
-    }
-  }
-
   try {
     const { data, error } = await supabase
       .from('workspaces')
@@ -185,8 +157,7 @@ export async function createWorkspace(
         hidden: false,
       }))
 
-  if (isSupabaseReady) {
-    try {
+  try {
       const { data, error } = await supabase
         .from('workspaces')
         .insert(newWorkspace)
@@ -211,7 +182,6 @@ export async function createWorkspace(
     } catch (err) {
       console.warn('Failed to insert workspace in Supabase:', err)
     }
-  }
 
   // Update local cache
   const allWorkspaces = load<Workspace>(KEYS.workspaces)
@@ -243,8 +213,7 @@ export async function updateWorkspace(
   workspaces[idx] = updated
   save(KEYS.workspaces, workspaces)
 
-  if (isSupabaseReady) {
-    try {
+  try {
       const { error } = await supabase
         .from('workspaces')
         .update(updated)
@@ -256,7 +225,6 @@ export async function updateWorkspace(
     } catch (err) {
       console.warn('Supabase workspace update error:', err)
     }
-  }
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('gc:data-changed', { detail: 'workspace_updated' }))
@@ -283,30 +251,6 @@ export async function archiveWorkspace(
 // ── Workspace Columns ─────────────────────────────────────────────────────────
 
 export async function fetchWorkspaceColumns(workspaceId: string): Promise<Result<WorkspaceColumn[]>> {
-  if (!isSupabaseReady) {
-    const all = load<WorkspaceColumn>(KEYS.workspace_columns)
-    const filtered = all
-      .filter(c => c.workspace_id === workspaceId)
-      .sort((a, b) => a.position - b.position)
-
-    if (filtered.length === 0) {
-      // Generate default columns for this workspace
-      const defaults = DEFAULT_WORKSPACE_COLUMNS.map((col, index) => ({
-        id: genId(),
-        workspace_id: workspaceId,
-        name: col.name,
-        type: col.type,
-        position: index,
-        required: col.required ?? false,
-        options: col.options || [],
-        hidden: false,
-      }))
-      save(KEYS.workspace_columns, [...all, ...defaults])
-      return { data: defaults, error: null }
-    }
-    return { data: filtered, error: null }
-  }
-
   try {
     const { data, error } = await supabase
       .from('workspace_columns')
@@ -359,15 +303,13 @@ export async function saveWorkspaceColumns(
     hidden: c.hidden ?? false,
   }))
 
-  if (isSupabaseReady) {
-    try {
+  try {
       await supabase.from('workspace_columns').delete().eq('workspace_id', workspaceId)
       const { error } = await supabase.from('workspace_columns').insert(formatted)
       if (error) console.warn('Supabase workspace_columns insert error:', error)
     } catch (err) {
       console.warn('Supabase workspace_columns save error:', err)
     }
-  }
 
   // Update local
   const all = load<WorkspaceColumn>(KEYS.workspace_columns).filter(c => c.workspace_id !== workspaceId)
@@ -397,17 +339,7 @@ export async function fetchWorkspaceCompanies(
   let contacts: Contact[] = []
   let callLogs: CallLog[] = []
 
-  if (!isSupabaseReady) {
-    const allCompanies = load<Company>(KEYS.companies)
-    contacts = load<Contact>(KEYS.contacts)
-    callLogs = load<CallLog>(KEYS.call_logs)
-
-    companies = allCompanies.filter(c => {
-      const matchWs = (c.workspace_id && c.workspace_id === workspaceId) || c.list_id === workspaceId
-      const matchArchived = options?.includeArchived ? true : !c.archived
-      return matchWs && matchArchived
-    })
-  } else {
+  {
     try {
       // Query companies matching workspace_id OR list_id
       let q = supabase
@@ -526,8 +458,7 @@ export async function upsertCompanyInWorkspace(
   }
 
   // Supabase FIRST
-  if (isSupabaseReady) {
-    try {
+  try {
       const { error } = await supabase
         .from('companies')
         .upsert(fullCompany, { onConflict: 'id' })
@@ -554,7 +485,6 @@ export async function upsertCompanyInWorkspace(
       const msg = err instanceof Error ? err.message : String(err)
       return { data: null, error: msg }
     }
-  }
 
   // Update local cache
   const companies = load<Company>(KEYS.companies)
@@ -607,8 +537,7 @@ export async function archiveCompany(
     save(KEYS.companies, companies)
   }
 
-  if (isSupabaseReady) {
-    try {
+  try {
       const { error } = await supabase
         .from('companies')
         .update({ archived: true, archived_at: new Date().toISOString() })
@@ -617,7 +546,6 @@ export async function archiveCompany(
     } catch (err: unknown) {
       return { data: false, error: err instanceof Error ? err.message : String(err) }
     }
-  }
 
   if (user) {
     await logAudit('company', companyId, 'archive', user.id, user.name, 'archived', 'false', 'true')
@@ -642,8 +570,7 @@ export async function restoreCompany(
     save(KEYS.companies, companies)
   }
 
-  if (isSupabaseReady) {
-    try {
+  try {
       const { error } = await supabase
         .from('companies')
         .update({ archived: false, archived_at: null })
@@ -652,7 +579,6 @@ export async function restoreCompany(
     } catch (err: unknown) {
       return { data: false, error: err instanceof Error ? err.message : String(err) }
     }
-  }
 
   if (user) {
     await logAudit('company', companyId, 'restore', user.id, user.name, 'archived', 'true', 'false')
@@ -668,8 +594,7 @@ export async function bulkUpdateCompanies(
 ): Promise<Result<number>> {
   if (companyIds.length === 0) return { data: 0, error: null }
 
-  if (isSupabaseReady) {
-    try {
+  try {
       const { error } = await supabase
         .from('companies')
         .update(updates)
@@ -679,7 +604,6 @@ export async function bulkUpdateCompanies(
     } catch (err: unknown) {
       return { data: 0, error: err instanceof Error ? err.message : String(err) }
     }
-  }
 
   // Update local cache
   const companies = load<Company>(KEYS.companies)
@@ -724,10 +648,7 @@ export async function acquireLeadLock(
     // fallback if api unreachable
   }
 
-  if (!isSupabaseReady) {
-    // In local mode, lock succeeds
-    return { success: true }
-  }
+
 
   try {
     // Try calling the RPC function
@@ -768,7 +689,7 @@ export async function releaseLeadLock(companyId: string, userId: string): Promis
     // ignore
   }
 
-  if (!isSupabaseReady) return
+
 
   try {
     await supabase
@@ -789,7 +710,7 @@ export async function fetchActiveLocks(): Promise<Record<string, LeadLock>> {
     // fallback
   }
 
-  if (!isSupabaseReady) return {}
+ {}
 
   try {
     const { data, error } = await supabase
@@ -820,19 +741,16 @@ export async function recordImport(
     ...importRecord,
   }
 
-  if (isSupabaseReady) {
-    try {
+  try {
       await supabase.from('imports').insert(full)
     } catch (err) {
       console.warn('Failed to record import in Supabase:', err)
     }
-  }
 
   return { data: full, error: null }
 }
 
 export async function fetchImports(workspaceId: string): Promise<Result<ImportRecord[]>> {
-  if (!isSupabaseReady) return { data: [], error: null }
 
   try {
     const { data, error } = await supabase
@@ -853,44 +771,27 @@ export async function rollbackImport(
   workspaceId: string,
   user?: { id: string; name: string }
 ): Promise<Result<number>> {
-  // Archive all companies associated with this import_id
-  if (isSupabaseReady) {
-    try {
-      const { data, error } = await supabase
-        .from('companies')
-        .update({ archived: true, archived_at: new Date().toISOString() })
-        .eq('import_id', importId)
-        .select('id')
+  try {
+    const { data, error } = await supabase
+      .from('companies')
+      .update({ archived: true, archived_at: new Date().toISOString() })
+      .eq('import_id', importId)
+      .select('id')
 
-      if (error) throw error
+    if (error) throw error
 
-      await supabase
-        .from('imports')
-        .update({ status: 'rolled_back' })
-        .eq('id', importId)
+    await supabase
+      .from('imports')
+      .update({ status: 'rolled_back' })
+      .eq('id', importId)
 
-      const count = data?.length || 0
-      return { data: count, error: null }
-    } catch (err: unknown) {
-      return { data: 0, error: err instanceof Error ? err.message : String(err) }
+    if (user) {
+      await logAudit('import', importId, 'archive', user.id, user.name, 'status', 'completed', 'rolled_back')
     }
+
+    const count = data?.length || 0
+    return { data: count, error: null }
+  } catch (err: unknown) {
+    return { data: 0, error: err instanceof Error ? err.message : String(err) }
   }
-
-  // Local fallback
-  const companies = load<Company>(KEYS.companies)
-  let count = 0
-  const updated = companies.map(c => {
-    if (c.import_id === importId) {
-      count++
-      return { ...c, archived: true, archived_at: new Date().toISOString() }
-    }
-    return c
-  })
-  save(KEYS.companies, updated)
-
-  if (user) {
-    await logAudit('import', importId, 'archive', user.id, user.name, 'status', 'completed', 'rolled_back')
-  }
-
-  return { data: count, error: null }
 }

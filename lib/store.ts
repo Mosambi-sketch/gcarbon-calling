@@ -14,8 +14,7 @@ function persistRemoteWrite(
   label: string,
   write: () => PromiseLike<{ error: { message: string } | null }>
 ): void {
-  if (!isSupabaseReady) return
-  Promise.resolve(write()).then(({ error }) => {
+Promise.resolve(write()).then(({ error }) => {
     if (error) console.error(`Supabase ${label} failed:`, error.message)
   }).catch((error: unknown) => console.error(`Supabase ${label} failed:`, error))
 }
@@ -38,120 +37,12 @@ export function notifyDataChanged(detail?: string): void {
   }
 }
 
-// ── Legacy Provided Excel Purge ──────────────────────────────────────────────
-// Completely removes any pre-seeded "Connection List" or demo sheets from localStorage
-export const LEGACY_PRESET_IDS = new Set([
-  'connection-list',
-  'cold-calling-1',
-  'cold-calling-2',
-  'new-list',
-  'data-centres',
-  'kharadi',
-  'ranjangaon',
-  'bhosari',
-  'chakan',
-  'freelancers',
-])
+// ── Legacy Compatibility Placeholders ─────────────────────────────────────────
+export const LEGACY_PRESET_IDS = new Set<string>()
 
-export function purgeLegacyProvidedExcel(): void {
-  if (typeof window === 'undefined') return
-  try {
-    const rawLists = load<ListDef>(KEYS.lists)
-    const hasLegacyLists = rawLists.some(l => LEGACY_PRESET_IDS.has(l.id) || l.name.toLowerCase() === 'connection list')
-    const rawCompanies = load<Company>(KEYS.companies)
-    const hasLegacyCompanies = rawCompanies.some(c => LEGACY_PRESET_IDS.has(c.list_id) || (c.workspace_id && LEGACY_PRESET_IDS.has(c.workspace_id)))
+export function purgeLegacyProvidedExcel(): void {}
 
-    if (hasLegacyLists || hasLegacyCompanies || localStorage.getItem('gc_legacy_purged_v6') !== 'true') {
-      const cleanLists = rawLists.filter(l => !LEGACY_PRESET_IDS.has(l.id) && l.name.toLowerCase() !== 'connection list')
-      save(KEYS.lists, cleanLists)
-
-      const cleanCompanies = rawCompanies.filter(c => !LEGACY_PRESET_IDS.has(c.list_id) && (!c.workspace_id || !LEGACY_PRESET_IDS.has(c.workspace_id)))
-      save(KEYS.companies, cleanCompanies)
-
-      const workspaces = load<any>(KEYS.workspaces)
-      const cleanWorkspaces = workspaces.filter((w: any) => !LEGACY_PRESET_IDS.has(w.id) && w.name?.toLowerCase() !== 'connection list')
-      save(KEYS.workspaces, cleanWorkspaces)
-
-      // Also clean up any orphan contacts or call logs whose companies were deleted
-      const validCompanyIds = new Set(cleanCompanies.map(c => c.id))
-      const contacts = load<Contact>(KEYS.contacts)
-      const cleanContacts = contacts.filter(c => validCompanyIds.has(c.company_id))
-      save(KEYS.contacts, cleanContacts)
-
-      const callLogs = load<CallLog>(KEYS.call_logs)
-      const cleanCallLogs = callLogs.filter(l => validCompanyIds.has(l.company_id))
-      save(KEYS.call_logs, cleanCallLogs)
-
-      localStorage.setItem('gc_legacy_purged_v6', 'true')
-    }
-  } catch (err) {
-    console.warn('Error purging legacy excel data:', err)
-  }
-}
-
-import crmData from '../data/crm-calling.json'
-
-// ── Seed CRM Excel Data (without Connection List, with SharePoint Live updates) ──
-export function initCRMExcelData(): void {
-  if (typeof window === 'undefined') return
-  try {
-    const isLoaded = localStorage.getItem('gc_crm_excel_seeded_v8_clean') === 'true'
-    const currentLists = load<ListDef>(KEYS.lists)
-    if (!isLoaded || currentLists.length === 0) {
-      const existingCompanies = load<Company>(KEYS.companies)
-      const existingMap = new Map<string, Company>()
-      existingCompanies.forEach(c => {
-        existingMap.set(c.id, c)
-        if (c.name && c.list_id) {
-          existingMap.set(`${c.list_id}:::${c.name.trim().toLowerCase()}`, c)
-        }
-      })
-
-      // Merge companies: preserve existing user edits/statuses while adding all new leads
-      const mergedCompanies = (crmData.companies as Company[]).map(newC => {
-        const key = `${newC.list_id}:::${(newC.name || '').trim().toLowerCase()}`
-        const existing = existingMap.get(newC.id) || existingMap.get(key)
-        if (existing) {
-          return {
-            ...newC,
-            ...existing,
-            id: existing.id || newC.id,
-            name: newC.name,
-            owner_name: newC.owner_name || existing.owner_name,
-            list_id: newC.list_id,
-            workspace_id: newC.workspace_id,
-          }
-        }
-        return newC
-      })
-
-      save(KEYS.lists, crmData.lists as ListDef[])
-      save(KEYS.companies, mergedCompanies)
-      save(KEYS.contacts, crmData.contacts as Contact[])
-      save(KEYS.call_logs, (crmData.call_logs || []) as CallLog[])
-
-      const workspaces = (crmData.lists as ListDef[]).map(l => ({
-        id: l.id,
-        name: l.name,
-        type: l.type,
-        created_at: l.created_at,
-        archived: false,
-        columns: [],
-      }))
-      save(KEYS.workspaces, workspaces)
-
-      localStorage.setItem('gc_crm_excel_seeded_v7_touch', 'true')
-    }
-  } catch (err) {
-    console.warn('Failed to initialize CRM excel data:', err)
-  }
-}
-
-// Auto-run purge & CRM Excel initialization
-if (typeof window !== 'undefined') {
-  purgeLegacyProvidedExcel()
-  initCRMExcelData()
-}
+export function initCRMExcelData(): void {}
 
 // ---------- Auth ----------
 export interface AppUser {
@@ -165,14 +56,14 @@ export interface AppUser {
 }
 
 export const DEFAULT_USERS: AppUser[] = [
-  { id: 'user-aadarsh', email: 'aadarsh.gcarbon@gmail.com', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: 'gcarbon123', avatar: '/avatars/aadarsh-face.jpg' },
-  { id: 'user-tamanna', email: 'tamanna.gcarbon@gmail.com', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123', avatar: '/avatars/tamanna-face.jpg' },
-  { id: 'user-naresh', email: 'naresh.gcarbon@gmail.com', name: 'Naresh', role: 'caller', color: '#FDE047', password: 'gcarbon123', avatar: '/avatars/naresh-face.jpg' },
-  { id: 'user-pranita', email: 'pranita.gcarbon@gmail.com', name: 'Pranita', role: 'caller', color: '#F472B6', password: 'gcarbon123', avatar: '/avatars/pranita-face.jpg' },
-  { id: 'user-himanshi', email: 'himanshi.gcarbon@gmail.com', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123', avatar: '/avatars/himanshi-face.jpg' },
-  { id: 'user-ankesh', email: 'ankesh.gcarbon@gmail.com', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: 'gcarbon123', avatar: '/avatars/ankesh-face.jpg' },
-  { id: 'user-kunal', email: 'kunal.gcarbon114@gmail.com', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: 'gcarbon123', avatar: '/avatars/kunal-face.jpg' },
-  { id: 'user-ajinkya', email: 'ajnikya.gcarbon@gmail.com', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
+  { id: 'user-aadarsh', email: 'aadarsh.gcarbon@gmail.com', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: '', avatar: '/avatars/aadarsh-face.jpg' },
+  { id: 'user-tamanna', email: 'tamanna.gcarbon@gmail.com', name: 'Tamanna', role: 'caller', color: '#E8894F', password: '', avatar: '/avatars/tamanna-face.jpg' },
+  { id: 'user-naresh', email: 'naresh.gcarbon@gmail.com', name: 'Naresh', role: 'caller', color: '#FDE047', password: '', avatar: '/avatars/naresh-face.jpg' },
+  { id: 'user-pranita', email: 'pranita.gcarbon@gmail.com', name: 'Pranita', role: 'caller', color: '#F472B6', password: '', avatar: '/avatars/pranita-face.jpg' },
+  { id: 'user-himanshi', email: 'himanshi.gcarbon@gmail.com', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: '', avatar: '/avatars/himanshi-face.jpg' },
+  { id: 'user-ankesh', email: 'ankesh.gcarbon@gmail.com', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: '', avatar: '/avatars/ankesh-face.jpg' },
+  { id: 'user-kunal', email: 'kunal.gcarbon114@gmail.com', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: '', avatar: '/avatars/kunal-face.jpg' },
+  { id: 'user-ajinkya', email: 'ajnikya.gcarbon@gmail.com', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: '', avatar: '/avatars/ajinkya-face.png' },
 ]
 
 export function normalizeEmail(email: string): string {
@@ -180,8 +71,7 @@ export function normalizeEmail(email: string): string {
 }
 
 export function isAuthorizedEmployee(email: string): boolean {
-  const norm = normalizeEmail(email)
-  return DEFAULT_USERS.some(u => normalizeEmail(u.email) === norm)
+  return Boolean(email && email.trim())
 }
 
 export function getUsers(): AppUser[] {
@@ -200,16 +90,8 @@ export function getUsers(): AppUser[] {
   return enriched
 }
 
-export function login(email: string, password?: string): AppUser | null {
-  const norm = normalizeEmail(email)
-  const users = getUsers()
-  const matched = users.find(u => normalizeEmail(u.email) === norm)
-  if (!matched) return null
-  // In demo/offline mode password check
-  if (password && matched.password && matched.password !== password) {
-    return null
-  }
-  return matched
+export function login(_email: string, _password?: string): AppUser | null {
+  return null
 }
 
 export function getCurrentUser(): AppUser | null {
@@ -250,10 +132,7 @@ export interface ListDef {
 }
 
 export function getLists(): ListDef[] {
-  purgeLegacyProvidedExcel()
-  return load<ListDef>(KEYS.lists).filter(
-    l => !LEGACY_PRESET_IDS.has(l.id) && l.name.toLowerCase() !== 'connection list'
-  )
+  return load<ListDef>(KEYS.lists)
 }
 
 export function addList(name: string, type: 'company' | 'freelancer' = 'company'): ListDef {
@@ -337,10 +216,7 @@ export function renameList(id: string, newName: string): ListDef | null {
 
 // ---------- Companies ----------
 export function getCompanies(listId?: string): Company[] {
-  purgeLegacyProvidedExcel()
-  const all = load<Company>(KEYS.companies).filter(
-    c => !LEGACY_PRESET_IDS.has(c.list_id) && (!c.workspace_id || !LEGACY_PRESET_IDS.has(c.workspace_id))
-  )
+  const all = load<Company>(KEYS.companies)
   if (listId && listId !== 'all') {
     return all.filter(c => (c.workspace_id && c.workspace_id === listId) || c.list_id === listId)
   }

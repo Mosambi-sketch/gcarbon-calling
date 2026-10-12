@@ -240,7 +240,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                 <button
                   key={u.email}
                   type="button"
-                  onClick={() => { setEmail(u.email); setPassword('gcarbon123') }}
+                  onClick={() => { setEmail(u.email); setPassword('') }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
                     padding: '6px 8px', borderRadius: 8, border: 'none',

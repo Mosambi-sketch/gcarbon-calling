@@ -18,6 +18,7 @@ import type {
 } from './types'
 import type { AppUser } from './store'
 import { getCachedUser } from './db'
+import { supabase } from './supabase'
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api'
 
@@ -30,6 +31,15 @@ async function request<T>(
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      if (sessionData?.session?.access_token) {
+        headers['Authorization'] = `Bearer ${sessionData.session.access_token}`
+      }
+    } catch {
+      // ignore session lookup failure
     }
 
     if (user?.email) {

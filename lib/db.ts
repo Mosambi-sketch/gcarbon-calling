@@ -9,7 +9,7 @@
  * back completely to localStorage so the app still runs offline.
  */
 
-import { supabase, isSupabaseReady } from './supabase'
+import { supabase } from './supabase'
 import { api } from './api'
 import type { User as SupabaseUser } from '@supabase/supabase-js'
 import {
@@ -27,8 +27,8 @@ import type { OutcomeType } from './types'
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-export function isCompanyEmail(email: string): boolean {
-  return isAuthorizedEmployee(email)
+export function isCompanyEmail(_email: string): boolean {
+  return true
 }
 
 export async function getAppUserFromSupabaseUser(authUser: SupabaseUser): Promise<AppUser> {
@@ -54,12 +54,10 @@ export async function getAppUserFromSupabaseUser(authUser: SupabaseUser): Promis
 }
 
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
-  if (!isSupabaseReady) return { error: 'Google sign-in requires Supabase setup.' }
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: window.location.origin,
-      queryParams: { hd: 'gcarbon.in' },
     },
   })
   return { error: error?.message ?? null }
@@ -70,15 +68,12 @@ export async function signUpWithCompanyEmail(
   password: string
 ): Promise<{ user: AppUser | null; error: string | null; message?: string }> {
   const normalizedEmail = email.trim().toLowerCase()
-  if (!isCompanyEmail(normalizedEmail)) return { user: null, error: 'Use your @gcarbon.in company email.' }
-  if (!isSupabaseReady) return { user: null, error: 'Account creation requires Supabase setup.' }
   if (password.length < 8) return { user: null, error: 'Use a password with at least 8 characters.' }
 
   const { data, error } = await supabase.auth.signUp({
     email: normalizedEmail,
     password,
     options: {
-      data: { name: normalizedEmail.split('@')[0], role: 'caller' },
       emailRedirectTo: window.location.origin,
     },
   })
@@ -95,8 +90,6 @@ export async function signUpWithCompanyEmail(
 
 export async function sendPasswordReset(email: string): Promise<{ error: string | null }> {
   const normalizedEmail = email.trim().toLowerCase()
-  if (!isCompanyEmail(normalizedEmail)) return { error: 'Use your @gcarbon.in company email.' }
-  if (!isSupabaseReady) return { error: 'Password recovery requires Supabase setup.' }
   const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
     redirectTo: window.location.origin,
   })
@@ -112,28 +105,13 @@ export async function signIn(
   password: string
 ): Promise<{ user: AppUser | null; error: string | null }> {
   const norm = normalizeEmail(email)
-  if (!isCompanyEmail(norm)) {
-    return {
-      user: null,
-      error: 'Unauthorized: Only allowed Gcarbon team accounts can access this SaaS.',
-    }
+  if (!norm) {
+    return { user: null, error: 'Please enter your email.' }
   }
 
-  // If backend API is running, verify with backend or local store
-  const users = DEFAULT_USERS
-  const found = users.find((u) => normalizeEmail(u.email) === norm)
-  if (found) {
-    localStorage.setItem(KEYS.current_user, JSON.stringify(found))
-    return { user: found, error: null }
-  }
-
-  if (!isSupabaseReady) {
-    return { user: null, error: 'Invalid email or credentials.' }
-  }
-
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  const { data, error } = await supabase.auth.signInWithPassword({ email: norm, password })
   if (error || !data.user) {
-    return { user: null, error: error?.message ?? 'Login failed.' }
+    return { user: null, error: error?.message ?? 'Invalid email or password.' }
   }
 
   // Fetch the profile row
@@ -149,7 +127,7 @@ export async function signIn(
     name: profile?.name ?? email.split('@')[0],
     role: (profile?.role as 'admin' | 'caller') ?? 'caller',
     color: profile?.color ?? '#E8E8E8',
-    password: '', // never store in Supabase mode
+    password: '',
     avatar: profile?.avatar ?? undefined,
   }
   localStorage.setItem(KEYS.current_user, JSON.stringify(appUser))
@@ -158,9 +136,7 @@ export async function signIn(
 
 export async function signOut(): Promise<void> {
   localStorage.removeItem(KEYS.current_user)
-  if (isSupabaseReady) {
-    await supabase.auth.signOut()
-  }
+  await supabase.auth.signOut()
 }
 
 /** Return the cached user from localStorage (instant, no await needed). */
@@ -176,9 +152,8 @@ export function getCachedUser(): AppUser | null {
 
 /** Fetch live profile list — from Supabase if ready, localStorage otherwise. */
 export async function getProfiles(): Promise<AppUser[]> {
-  if (!isSupabaseReady) return DEFAULT_USERS
   const { data } = await supabase.from('profiles').select('*')
-  return (data ?? []).map((p) => ({
+  const profiles = (data ?? []).map((p) => ({
     id: p.id,
     email: p.email,
     name: p.name,
@@ -187,17 +162,15 @@ export async function getProfiles(): Promise<AppUser[]> {
     password: '',
     avatar: p.avatar ?? getAvatar(p.name) ?? undefined,
   }))
+  if (profiles.length > 0) {
+    save(KEYS.users, profiles)
+  }
+  return profiles.length > 0 ? profiles : DEFAULT_USERS
 }
 
 // ── Companies ─────────────────────────────────────────────────────────────────
 
 export async function fetchCompanies(listId?: string): Promise<Company[]> {
-  if (!isSupabaseReady) {
-    const all = load<Company>(KEYS.companies)
-    return listId && listId !== 'all'
-      ? all.filter((c) => (c.workspace_id && c.workspace_id === listId) || c.list_id === listId)
-      : all
-  }
   let q = supabase.from('companies').select('*').order('created_at', { ascending: false })
   if (listId && listId !== 'all') {
     q = q.or(`workspace_id.eq.${listId},list_id.eq.${listId}`)
@@ -227,9 +200,7 @@ export async function upsertCompany(
   else companies.push(company)
   save(KEYS.companies, companies)
 
-  if (isSupabaseReady) {
-    await supabase.from('companies').upsert(company, { onConflict: 'id' })
-  }
+  await supabase.from('companies').upsert(company, { onConflict: 'id' })
   try {
     void api.companies.save(company)
   } catch (err) {
@@ -241,9 +212,7 @@ export async function upsertCompany(
 
 export async function deleteCompanyDb(id: string): Promise<void> {
   save(KEYS.companies, load<Company>(KEYS.companies).filter((c) => c.id !== id))
-  if (isSupabaseReady) {
-    await supabase.from('companies').delete().eq('id', id)
-  }
+  await supabase.from('companies').delete().eq('id', id)
   try {
     void api.companies.delete(id)
   } catch (err) {
@@ -255,10 +224,6 @@ export async function deleteCompanyDb(id: string): Promise<void> {
 // ── Contacts ──────────────────────────────────────────────────────────────────
 
 export async function fetchContacts(companyId?: string): Promise<Contact[]> {
-  if (!isSupabaseReady) {
-    const all = load<Contact>(KEYS.contacts)
-    return companyId ? all.filter((c) => c.company_id === companyId) : all
-  }
   let q = supabase.from('contacts').select('*')
   if (companyId) q = q.eq('company_id', companyId)
   const { data, error } = await q
@@ -276,9 +241,7 @@ export async function upsertContact(
   else contacts.push(contact)
   save(KEYS.contacts, contacts)
 
-  if (isSupabaseReady) {
-    await supabase.from('contacts').upsert(contact, { onConflict: 'id' })
-  }
+  await supabase.from('contacts').upsert(contact, { onConflict: 'id' })
   notifyDataChanged('update-contact')
   return contact
 }
@@ -286,12 +249,6 @@ export async function upsertContact(
 // ── Call Logs ─────────────────────────────────────────────────────────────────
 
 export async function fetchCallLogs(companyId?: string): Promise<CallLog[]> {
-  if (!isSupabaseReady) {
-    const all = load<CallLog>(KEYS.call_logs).sort(
-      (a, b) => new Date(b.called_at).getTime() - new Date(a.called_at).getTime()
-    )
-    return companyId ? all.filter((l) => l.company_id === companyId) : all
-  }
   let q = supabase
     .from('call_logs')
     .select('*')
@@ -330,8 +287,7 @@ export async function addCallLogDb(data: Omit<CallLog, 'id'>): Promise<CallLog> 
     save(KEYS.companies, companies)
   }
 
-  if (isSupabaseReady) {
-    const row = {
+  const row = {
       id: log.id,
       company_id: log.company_id,
       contact_id: log.contact_id ?? null,
@@ -351,7 +307,6 @@ export async function addCallLogDb(data: Omit<CallLog, 'id'>): Promise<CallLog> 
       .from('companies')
       .update({ status: outcomeToStatus(data.outcome, data.follow_up_date) })
       .eq('id', data.company_id)
-  }
 
   try {
     void api.calls.create(log)
@@ -384,19 +339,13 @@ export async function deleteCallLogDb(id: string): Promise<void> {
     save(KEYS.companies, companies)
   }
 
-  if (isSupabaseReady) {
-    await supabase.from('call_logs').delete().eq('id', id)
-  }
+  await supabase.from('call_logs').delete().eq('id', id)
   notifyDataChanged('delete-call-log')
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export async function fetchTasks(assigneeId?: string): Promise<Task[]> {
-  if (!isSupabaseReady) {
-    const all = load<Task>(KEYS.tasks)
-    return assigneeId ? all.filter((t) => t.assignee_id === assigneeId) : all
-  }
   let q = supabase.from('tasks').select('*').order('created_at', { ascending: false })
   if (assigneeId) q = q.eq('assignee_id', assigneeId)
   const { data, error } = await q
@@ -418,9 +367,7 @@ export async function upsertTask(
   else tasks.push(task)
   save(KEYS.tasks, tasks)
 
-  if (isSupabaseReady) {
-    await supabase.from('tasks').upsert(task, { onConflict: 'id' })
-  }
+  await supabase.from('tasks').upsert(task, { onConflict: 'id' })
   try {
     void api.tasks.save(task)
   } catch (err) {
@@ -432,24 +379,13 @@ export async function upsertTask(
 
 export async function deleteTaskDb(id: string): Promise<void> {
   save(KEYS.tasks, load<Task>(KEYS.tasks).filter((t) => t.id !== id))
-  if (isSupabaseReady) {
-    await supabase.from('tasks').delete().eq('id', id)
-  }
+  await supabase.from('tasks').delete().eq('id', id)
   notifyDataChanged('delete-task')
 }
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
 
 export async function fetchNotes(ownerId: string): Promise<Note[]> {
-  if (!isSupabaseReady) {
-    return load<Note>(KEYS.notes)
-      .filter((n) => n.owner_id === ownerId)
-      .sort((a, b) => {
-        if (a.pinned && !b.pinned) return -1
-        if (!a.pinned && b.pinned) return 1
-        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-      })
-  }
   const { data, error } = await supabase
     .from('notes')
     .select('*')
@@ -474,9 +410,7 @@ export async function upsertNote(
   else notes.push(note)
   save(KEYS.notes, notes)
 
-  if (isSupabaseReady) {
-    await supabase.from('notes').upsert(note, { onConflict: 'id' })
-  }
+  await supabase.from('notes').upsert(note, { onConflict: 'id' })
   try {
     void api.notes.save(note)
   } catch (err) {
@@ -488,19 +422,13 @@ export async function upsertNote(
 
 export async function deleteNoteDb(id: string): Promise<void> {
   save(KEYS.notes, load<Note>(KEYS.notes).filter((n) => n.id !== id))
-  if (isSupabaseReady) {
-    await supabase.from('notes').delete().eq('id', id)
-  }
+  await supabase.from('notes').delete().eq('id', id)
   notifyDataChanged('delete-note')
 }
 
 // ── Calendar Events ───────────────────────────────────────────────────────────
 
 export async function fetchEvents(ownerId?: string): Promise<CalendarEvent[]> {
-  if (!isSupabaseReady) {
-    const all = load<CalendarEvent>(KEYS.events)
-    return ownerId ? all.filter((e) => e.owner_id === ownerId) : all
-  }
   // Map DB column names → app field names
   const q = supabase.from('calendar_events').select('*').order('start_at', { ascending: true })
   const { data, error } = await q
@@ -527,21 +455,20 @@ export async function upsertEvent(
   else events.push(event)
   save(KEYS.events, events)
 
-  if (isSupabaseReady) {
-    await supabase.from('calendar_events').upsert(
-      {
-        id: event.id,
-        title: event.title,
-        start_at: event.start,
-        end_at: event.end,
-        type: event.type,
-        company_id: event.company_id ?? null,
-        owner_id: event.owner_id,
-        all_day: event.all_day ?? false,
-      },
-      { onConflict: 'id' }
-    )
-  }
+  await supabase.from('calendar_events').upsert(
+    {
+      id: event.id,
+      title: event.title,
+      start_at: event.start,
+      end_at: event.end,
+      type: event.type,
+      company_id: event.company_id ?? null,
+      owner_id: event.owner_id,
+      all_day: event.all_day ?? false,
+    },
+    { onConflict: 'id' }
+  )
+
   try {
     void api.events.save(event)
   } catch (err) {
@@ -553,9 +480,7 @@ export async function upsertEvent(
 
 export async function deleteEventDb(id: string): Promise<void> {
   save(KEYS.events, load<CalendarEvent>(KEYS.events).filter((e) => e.id !== id))
-  if (isSupabaseReady) {
-    await supabase.from('calendar_events').delete().eq('id', id)
-  }
+  await supabase.from('calendar_events').delete().eq('id', id)
   try {
     void api.events.delete(id)
   } catch (err) {
@@ -806,7 +731,7 @@ export async function syncFromSupabase(): Promise<void> {
     console.warn('MongoDB sync attempt:', err)
   }
 
-  if (!isSupabaseReady) return
+  
   try {
     const [lists, workspaces, workspaceColumns, companies, contacts, callLogs, tasks, notes, events] = await Promise.all([
       supabase.from('lists').select('*'),
@@ -855,15 +780,6 @@ export async function syncFromSupabase(): Promise<void> {
 
 /** Subscribe to realtime changes and dispatch a custom DOM event so components can refresh. */
 export function subscribeRealtime(): () => void {
-  if (!isSupabaseReady) {
-    const interval = setInterval(() => {
-      void syncFromSupabase().then(() => {
-        window.dispatchEvent(new CustomEvent('gc:data-changed', { detail: 'remote' }))
-      }).catch(() => {})
-    }, 10000)
-    return () => clearInterval(interval)
-  }
-
   let refreshTimer: number | undefined
   const refreshCache = () => {
     if (refreshTimer) window.clearTimeout(refreshTimer)

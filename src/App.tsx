@@ -16,18 +16,53 @@ export default function App() {
   const [user, setUser] = useState<AppUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Initialise auth — Supabase session or localStorage fallback
+  // Initialise auth — Supabase session only
   useEffect(() => {
     async function init() {
-      if (isSupabaseReady) {
-        // Check for existing Supabase session
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session) {
+      if (!isSupabaseReady) {
+        setLoading(false)
+        return
+      }
+
+      // Check for existing Supabase session
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        const cached = getCachedUser()
+        if (cached && cached.email.toLowerCase() === (session.user.email ?? '').toLowerCase()) {
+          setUser(cached)
+        } else {
+          // Rebuild profile from Supabase
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single()
+          if (profile) {
+            const appUser: AppUser = {
+              id: session.user.id,
+              email: session.user.email ?? '',
+              name: profile.name,
+              role: profile.role as 'admin' | 'caller',
+              color: profile.color,
+              password: '',
+              avatar: profile.avatar ?? getAvatar(profile.name) ?? undefined,
+            }
+            localStorage.setItem('gc_current_user', JSON.stringify(appUser))
+            setUser(appUser)
+          }
+        }
+      }
+
+      // Listen for auth state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          localStorage.removeItem('gc_current_user')
+          setUser(null)
+        } else if (event === 'SIGNED_IN' && session) {
           const cached = getCachedUser()
-          if (cached) {
+          if (cached && cached.email.toLowerCase() === (session.user.email ?? '').toLowerCase()) {
             setUser(cached)
           } else {
-            // Rebuild profile from Supabase
             const { data: profile } = await supabase
               .from('profiles')
               .select('*')
@@ -48,24 +83,9 @@ export default function App() {
             }
           }
         }
-
-        // Listen for auth state changes (sign-in / sign-out from other tabs)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          if (event === 'SIGNED_OUT' || !session) {
-            setUser(null)
-          } else if (event === 'SIGNED_IN' && session) {
-            const cached = getCachedUser()
-            if (cached) setUser(cached)
-          }
-        })
-        setLoading(false)
-        return () => subscription.unsubscribe()
-      } else {
-        // Local-only mode: read from localStorage
-        const cached = getCachedUser()
-        setUser(cached)
-        setLoading(false)
-      }
+      })
+      setLoading(false)
+      return () => subscription.unsubscribe()
     }
 
     init()
@@ -77,6 +97,15 @@ export default function App() {
     await signOut()
     setUser(null)
   }, [])
+
+  if (!isSupabaseReady) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#EFEFEF', color: '#0B0B0B', fontFamily: 'inherit', textAlign: 'center', padding: 20 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Configuration error</h2>
+        <p style={{ fontSize: 14, color: '#666' }}>Supabase environment variables are missing or invalid.</p>
+      </div>
+    )
+  }
 
   if (loading) {
     return (
