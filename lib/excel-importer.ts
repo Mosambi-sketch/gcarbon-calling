@@ -73,6 +73,8 @@ export function normalizePhones(raw: string | number): string[] {
   }).filter(d => d.length >= 7 && d.length <= 15)
 }
 
+import { getISTDateStr } from './date'
+
 /**
  * Parse an Excel date serial to a JS Date string
  */
@@ -81,14 +83,15 @@ export function parseExcelDate(val: string | number | undefined): string | undef
   if (typeof val === 'number' && val > 40000 && val < 60000) {
     // Excel date serial
     const date = new Date((val - 25569) * 86400 * 1000)
-    return date.toISOString().split('T')[0]
+    return getISTDateStr(date)
   }
   if (typeof val === 'string') {
     // Try common date formats
     const dateStr = val.trim()
     if (!dateStr) return undefined
     const d = new Date(dateStr)
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+    if (!isNaN(d.getTime())) return getISTDateStr(d)
+
     // DD/MM/YYYY
     const match = dateStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/)
     if (match) {
@@ -132,7 +135,14 @@ export function matchColumn(headers: string[], variants: string[]): number {
   const normalized = headers.map(h => h.toLowerCase().trim().replace(/\s+/g, ' '))
   for (const v of variants) {
     const vn = v.toLowerCase().trim()
-    const idx = normalized.findIndex(h => h === vn || h.includes(vn) || vn.includes(h))
+    const idx = normalized.findIndex(h => h !== '' && h === vn)
+    if (idx >= 0) return idx
+  }
+
+  const longestFirst = [...variants].sort((a, b) => b.length - a.length)
+  for (const v of longestFirst) {
+    const vn = v.toLowerCase().trim()
+    const idx = normalized.findIndex(h => h !== '' && h.includes(vn))
     if (idx >= 0) return idx
   }
   return -1
@@ -152,7 +162,27 @@ export interface ParsedRow {
   follow_up_date?: string
   reference: boolean
   outcome: OutcomeType
+  custom_fields: Record<string, string>
+  source_data: Record<string, unknown>
   raw: Record<string, unknown>
+}
+
+export function getDetectedColumnMap(headers: string[]) {
+  const companyColumn = matchColumn(headers, ['company name', 'organization name', 'organisation name', 'business name', 'account name', 'lead name', 'prospect name', 'customer name', 'client name', 'name of company', 'company', 'organisation', 'organization', 'client', 'firm name', 'firm', 'business'])
+  return {
+    company: companyColumn >= 0 ? companyColumn : headers.findIndex(header => header.trim().toLowerCase() === 'name'),
+    contact: matchColumn(headers, ['contact person', 'concerned person', 'contact name', 'contact', 'person', 'owner', 'director', 'poc', 'manager']),
+    phone: matchColumn(headers, ['number', 'phone number', 'contact no', 'phone', 'mobile', 'mobile no', 'cell', 'tel', 'ph no', 'phone 1', 'contact number']),
+    email: matchColumn(headers, ['email id', 'email', 'mail', 'e-mail', 'email address']),
+    designation: matchColumn(headers, ['designation', 'designantion', 'role', 'position', 'title', 'post']),
+    sector: matchColumn(headers, ['sector', 'industry', 'category', 'domain', 'vertical']),
+    location: matchColumn(headers, ['location', 'place', 'city', 'address', 'region', 'state', 'town']),
+    caller: matchColumn(headers, ['who called', 'called by', 'called_by', 'caller', 'agent', 'executive', 'assigned to']),
+    remark1: matchColumn(headers, ['remarks', 'remark', 'remark 1', 'first remark', 'notes', 'feedback', 'comments']),
+    remark2: matchColumn(headers, ['second remark', 'remark 2', 'remark2', 'additional remark', 'latest remark']),
+    followup: matchColumn(headers, ['follow up date', 'follow-up date', 'follow up on', 'followup date', 'followup', 'next call', 'due date']),
+    reference: matchColumn(headers, ['reference / no reference', 'reference', 'ref', 'source']),
+  }
 }
 
 /**
@@ -160,37 +190,50 @@ export interface ParsedRow {
  */
 export function parseSheet(
   rows: unknown[][],
-  sheetName: string
-): { rows: ParsedRow[]; errors: string[]; headerRowIndex: number } {
+  sheetName: string,
+  customColMap?: Partial<Record<string, number>>
+): { rows: ParsedRow[]; errors: string[]; headerRowIndex: number; headers: string[] } {
   const errors: string[] = []
 
-  // Find header row (first row with at least 3 non-empty cells)
+  // Smart header row detection: finds the row with actual column names
   let headerRowIndex = 0
-  for (let i = 0; i < Math.min(5, rows.length); i++) {
-    const nonEmpty = (rows[i] as unknown[]).filter((c) => c !== '' && c !== null && c !== undefined).length
-    if (nonEmpty >= 3) {
+  let maxHeaderScore = -1
+
+  for (let i = 0; i < Math.min(6, rows.length); i++) {
+    const row = (rows[i] as unknown[]) || []
+    const cells = row.map(c => String(c ?? '').trim())
+    const nonEmpty = cells.filter(Boolean)
+    if (nonEmpty.length === 0) continue
+
+    const rowStr = cells.join(' ').toLowerCase()
+    let score = nonEmpty.length
+
+    // Strong indicators of column headers
+    if (rowStr.includes('company') || rowStr.includes('business') || rowStr.includes('firm')) score += 15
+    if (rowStr.includes('phone') || rowStr.includes('mobile') || rowStr.includes('number')) score += 15
+    if (rowStr.includes('contact') || rowStr.includes('person')) score += 10
+    if (rowStr.includes('designation') || rowStr.includes('role')) score += 8
+    if (rowStr.includes('remark') || rowStr.includes('status')) score += 8
+    if (rowStr.includes('email') || rowStr.includes('location')) score += 5
+
+    // Penalty for rows that look like high-level section titles (e.g. 2-3 cells across 15+ cols)
+    if (nonEmpty.length <= 3 && rows[i + 1] && (rows[i + 1] as unknown[]).length > 8) {
+      score -= 10
+    }
+
+    if (score > maxHeaderScore) {
+      maxHeaderScore = score
       headerRowIndex = i
-      break
     }
   }
 
-  const headers = (rows[headerRowIndex] as unknown[]).map(h => String(h ?? ''))
+  const headers = ((rows[headerRowIndex] as unknown[]) || []).map(h => String(h ?? '').trim())
 
-  // Map columns
-  const colMap = {
-    company: matchColumn(headers, ['company name', 'company ', 'company', 'name']),
-    contact: matchColumn(headers, ['contact person', 'concerned person', 'contact', 'person']),
-    phone: matchColumn(headers, ['number', 'phone number', 'contact no', 'phone', 'mobile']),
-    email: matchColumn(headers, ['email id', 'email', 'mail']),
-    designation: matchColumn(headers, ['designantion', 'designation', 'role', 'type']),
-    sector: matchColumn(headers, ['sector', 'industry']),
-    location: matchColumn(headers, ['location', 'place']),
-    caller: matchColumn(headers, ['who called', 'called by', 'called_by']),
-    remark1: matchColumn(headers, ['remarks', 'remark', 'remark 1']),
-    remark2: matchColumn(headers, ['second remark', 'remark 2', 'remark2']),
-    followup: matchColumn(headers, ['follow up date', 'follow-up date', 'follow up on', ' follow up date']),
-    reference: matchColumn(headers, ['reference / no reference', 'reference']),
-  }
+  // Map columns (merge detected with custom overrides)
+  const detected = getDetectedColumnMap(headers)
+  const colMap = { ...detected, ...(customColMap || {}) }
+  const mappedColumns = new Set(Object.values(colMap).filter(index => index >= 0))
+
 
   // Freelancer sheet special handling
   const isFreelancer = sheetName.toLowerCase().includes('freelancer')
@@ -223,6 +266,13 @@ export function parseSheet(
 
     const rawObj: Record<string, unknown> = {}
     headers.forEach((h, idx) => { rawObj[h] = row[idx] })
+    const customFields: Record<string, string> = {}
+    headers.forEach((header, index) => {
+      const name = header.trim()
+      if (name && !mappedColumns.has(index)) {
+        customFields[name] = String(row[index] ?? '').trim()
+      }
+    })
 
     parsed.push({
       company: companyName,
@@ -238,11 +288,13 @@ export function parseSheet(
       follow_up_date: followUpDate,
       reference: isReference,
       outcome,
+      custom_fields: customFields,
+      source_data: rawObj,
       raw: rawObj,
     })
   }
 
-  return { rows: parsed, errors, headerRowIndex }
+  return { rows: parsed, errors, headerRowIndex, headers }
 }
 
 export interface ImportSummary {

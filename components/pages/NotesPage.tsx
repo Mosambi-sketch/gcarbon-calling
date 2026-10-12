@@ -1,4 +1,3 @@
-'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { AppUser } from '@/lib/store'
 import { getNotes, addNote, updateNote, deleteNote } from '@/lib/store'
@@ -34,6 +33,18 @@ export default function NotesPage({ user }: { user: AppUser }) {
     setEditTitle(note.title)
     setEditBody(note.body)
   }
+
+  useEffect(() => {
+    const handleSharedNotesChange = () => {
+      const loaded = loadNotes()
+      const current = selectedNote ? loaded.find(note => note.id === selectedNote.id) : undefined
+      if (current) selectNote(current)
+      else if (loaded[0]) selectNote(loaded[0])
+      else setSelectedNote(null)
+    }
+    window.addEventListener('gc:data-changed', handleSharedNotesChange)
+    return () => window.removeEventListener('gc:data-changed', handleSharedNotesChange)
+  }, [loadNotes, selectedNote])
 
   const handleNewNote = () => {
     const note = addNote({
@@ -177,19 +188,19 @@ export default function NotesPage({ user }: { user: AppUser }) {
                 <input
                   style={{ 
                     fontSize: 18, fontWeight: 700, border: 'none', outline: 'none',
-                    width: '100%', background: 'transparent', fontFamily: 'inherit', color: '#0B0B0B',
+                    width: '100%', background: 'transparent', fontFamily: 'inherit', color: 'var(--text)',
                   }}
                   value={editTitle}
                   onChange={e => handleTitleChange(e.target.value)}
                   placeholder="Note title…"
                 />
               </div>
-              {saving && <span style={{ fontSize: 11, color: '#AAA' }}>Saving…</span>}
+              {saving && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Saving…</span>}
               {!saving && saved && <span style={{ fontSize: 11, color: '#16A34A' }}>✓ Saved</span>}
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => handlePin(selectedNote)}
-                style={{ color: selectedNote.pinned ? '#D97706' : '#888' }}
+                style={{ color: selectedNote.pinned ? '#F59E0B' : 'var(--text-muted)' }}
               >
                 {selectedNote.pinned ? '📌 Pinned' : '📌 Pin'}
               </button>
@@ -204,14 +215,14 @@ export default function NotesPage({ user }: { user: AppUser }) {
 
             {/* Editor area */}
             <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
-              <div style={{ fontSize: 11, color: '#AAA', marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
                 Last updated {format(parseISO(selectedNote.updated_at), 'dd MMM yyyy, hh:mm a')}
               </div>
               <textarea
                 style={{
                   width: '100%', minHeight: 400, border: 'none', outline: 'none',
                   fontFamily: 'inherit', fontSize: 14, lineHeight: 1.7,
-                  color: '#0B0B0B', resize: 'none', background: 'transparent',
+                  color: 'var(--text)', resize: 'none', background: 'transparent',
                 }}
                 value={editBody}
                 onChange={e => handleBodyChange(e.target.value)}

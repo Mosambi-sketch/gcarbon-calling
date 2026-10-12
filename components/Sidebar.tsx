@@ -1,4 +1,3 @@
-'use client'
 import { useState, useEffect, useRef } from 'react'
 import type { NavPage } from './AppShell'
 import type { AppUser } from '@/lib/store'
@@ -21,7 +20,7 @@ interface SidebarProps {
 }
 
 function SvgIcon({ name, active }: { name: string; active?: boolean }) {
-  const strokeColor = active ? '#0B0B0B' : 'rgba(255,255,255,0.7)'
+  const strokeColor = active ? '#09090B' : 'rgba(255,255,255,0.7)'
   const strokeW = active ? 2.1 : 1.8
 
   const icons: Record<string, React.ReactNode> = {
@@ -213,7 +212,7 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
           })}
         </div>
 
-        {/* Bottom Section: Profile Face Avatar & Logout */}
+        {/* Bottom Section: Profile Face Avatar, Theme Toggle & Logout */}
         <div className="sidebar-bottom-wrap">
           {/* User Face Avatar */}
           <div className="sidebar-avatar-wrap">
@@ -241,11 +240,11 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
-                    objectPosition: 'center 20%', // Keeps focus on face
+                    objectPosition: 'center 20%',
                   }}
                 />
               ) : (
-                <span style={{ fontWeight: 700, fontSize: 14, color: '#0B0B0B' }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: '#09090B' }}>
                   {getInitials(user.name)}
                 </span>
               )}
@@ -255,6 +254,23 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
             </div>
           </div>
 
+          {/* Theme Toggle */}
+          <button
+            className="theme-toggle"
+            onClick={() => {
+              const html = document.documentElement
+              const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'
+              html.setAttribute('data-theme', next)
+              localStorage.setItem('gc_theme', next)
+            }}
+            aria-label="Toggle dark mode"
+            title="Toggle dark mode"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+          </button>
+
           {/* Sign Out Button */}
           <div
             className="fluid-logout-btn"
@@ -262,6 +278,7 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
             role="button"
             tabIndex={0}
             title="Sign out"
+            aria-label="Sign out"
           >
             <SvgIcon name="logout" />
             <span className="sidebar-tooltip">Sign out</span>

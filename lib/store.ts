@@ -1,43 +1,157 @@
 // In-memory + localStorage data store for Gcarbon Calling CRM
-// This replaces Supabase for local-first operation.
-// When you configure Supabase credentials, swap these with supabase-js calls.
+// Acts as the synchronous local cache; db.ts wraps this with Supabase async calls.
 
-import { v4 as uuidv4 } from 'uuid'
 import type {
   Company, Contact, CallLog, Task, Note, CalendarEvent,
   CompanyStatus, OutcomeType
 } from './types'
 import { outcomeToStatus } from './types'
+import { getISTDateStr, addDaysIST } from './date'
+import { KEYS, load, save, genId } from './store-helpers'
+import { isSupabaseReady, supabase } from './supabase'
 
-// ---------- Storage keys ----------
-const KEYS = {
-  companies: 'gc_companies',
-  contacts: 'gc_contacts',
-  call_logs: 'gc_call_logs',
-  tasks: 'gc_tasks',
-  notes: 'gc_notes',
-  events: 'gc_events',
-  lists: 'gc_lists',
-  users: 'gc_users',
-  seeded: 'gc_seeded',
-  current_user: 'gc_current_user',
+function persistRemoteWrite(
+  label: string,
+  write: () => PromiseLike<{ error: { message: string } | null }>
+): void {
+  if (!isSupabaseReady) return
+  Promise.resolve(write()).then(({ error }) => {
+    if (error) console.error(`Supabase ${label} failed:`, error.message)
+  }).catch((error: unknown) => console.error(`Supabase ${label} failed:`, error))
 }
 
-// ---------- Generic CRUD helpers ----------
-function load<T>(key: string): T[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
+export { KEYS, load, save, genId }
+
+// ── Multi-Tab / Multi-Window Real-time Sync ──────────────────────────────────
+export const syncChannel = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined'
+  ? new BroadcastChannel('gc_sync_channel')
+  : null
+
+export function notifyDataChanged(detail?: string): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gc:data-changed', { detail }))
+    try {
+      syncChannel?.postMessage({ type: 'DATA_CHANGED', detail, timestamp: Date.now() })
+    } catch {
+      // ignore channel post errors
+    }
+  }
 }
 
-function save<T>(key: string, data: T[]): void {
+// ── Legacy Provided Excel Purge ──────────────────────────────────────────────
+// Completely removes any pre-seeded "Connection List" or demo sheets from localStorage
+export const LEGACY_PRESET_IDS = new Set([
+  'connection-list',
+  'cold-calling-1',
+  'cold-calling-2',
+  'new-list',
+  'data-centres',
+  'kharadi',
+  'ranjangaon',
+  'bhosari',
+  'chakan',
+  'freelancers',
+])
+
+export function purgeLegacyProvidedExcel(): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(key, JSON.stringify(data))
+  try {
+    const rawLists = load<ListDef>(KEYS.lists)
+    const hasLegacyLists = rawLists.some(l => LEGACY_PRESET_IDS.has(l.id) || l.name.toLowerCase() === 'connection list')
+    const rawCompanies = load<Company>(KEYS.companies)
+    const hasLegacyCompanies = rawCompanies.some(c => LEGACY_PRESET_IDS.has(c.list_id) || (c.workspace_id && LEGACY_PRESET_IDS.has(c.workspace_id)))
+
+    if (hasLegacyLists || hasLegacyCompanies || localStorage.getItem('gc_legacy_purged_v6') !== 'true') {
+      const cleanLists = rawLists.filter(l => !LEGACY_PRESET_IDS.has(l.id) && l.name.toLowerCase() !== 'connection list')
+      save(KEYS.lists, cleanLists)
+
+      const cleanCompanies = rawCompanies.filter(c => !LEGACY_PRESET_IDS.has(c.list_id) && (!c.workspace_id || !LEGACY_PRESET_IDS.has(c.workspace_id)))
+      save(KEYS.companies, cleanCompanies)
+
+      const workspaces = load<any>(KEYS.workspaces)
+      const cleanWorkspaces = workspaces.filter((w: any) => !LEGACY_PRESET_IDS.has(w.id) && w.name?.toLowerCase() !== 'connection list')
+      save(KEYS.workspaces, cleanWorkspaces)
+
+      // Also clean up any orphan contacts or call logs whose companies were deleted
+      const validCompanyIds = new Set(cleanCompanies.map(c => c.id))
+      const contacts = load<Contact>(KEYS.contacts)
+      const cleanContacts = contacts.filter(c => validCompanyIds.has(c.company_id))
+      save(KEYS.contacts, cleanContacts)
+
+      const callLogs = load<CallLog>(KEYS.call_logs)
+      const cleanCallLogs = callLogs.filter(l => validCompanyIds.has(l.company_id))
+      save(KEYS.call_logs, cleanCallLogs)
+
+      localStorage.setItem('gc_legacy_purged_v6', 'true')
+    }
+  } catch (err) {
+    console.warn('Error purging legacy excel data:', err)
+  }
 }
 
-function genId() { return uuidv4() }
+import crmData from '../data/crm-calling.json'
+
+// ── Seed CRM Excel Data (without Connection List, with SharePoint Live updates) ──
+export function initCRMExcelData(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const isLoaded = localStorage.getItem('gc_crm_excel_seeded_v8_clean') === 'true'
+    const currentLists = load<ListDef>(KEYS.lists)
+    if (!isLoaded || currentLists.length === 0) {
+      const existingCompanies = load<Company>(KEYS.companies)
+      const existingMap = new Map<string, Company>()
+      existingCompanies.forEach(c => {
+        existingMap.set(c.id, c)
+        if (c.name && c.list_id) {
+          existingMap.set(`${c.list_id}:::${c.name.trim().toLowerCase()}`, c)
+        }
+      })
+
+      // Merge companies: preserve existing user edits/statuses while adding all new leads
+      const mergedCompanies = (crmData.companies as Company[]).map(newC => {
+        const key = `${newC.list_id}:::${(newC.name || '').trim().toLowerCase()}`
+        const existing = existingMap.get(newC.id) || existingMap.get(key)
+        if (existing) {
+          return {
+            ...newC,
+            ...existing,
+            id: existing.id || newC.id,
+            name: newC.name,
+            owner_name: newC.owner_name || existing.owner_name,
+            list_id: newC.list_id,
+            workspace_id: newC.workspace_id,
+          }
+        }
+        return newC
+      })
+
+      save(KEYS.lists, crmData.lists as ListDef[])
+      save(KEYS.companies, mergedCompanies)
+      save(KEYS.contacts, crmData.contacts as Contact[])
+      save(KEYS.call_logs, (crmData.call_logs || []) as CallLog[])
+
+      const workspaces = (crmData.lists as ListDef[]).map(l => ({
+        id: l.id,
+        name: l.name,
+        type: l.type,
+        created_at: l.created_at,
+        archived: false,
+        columns: [],
+      }))
+      save(KEYS.workspaces, workspaces)
+
+      localStorage.setItem('gc_crm_excel_seeded_v7_touch', 'true')
+    }
+  } catch (err) {
+    console.warn('Failed to initialize CRM excel data:', err)
+  }
+}
+
+// Auto-run purge & CRM Excel initialization
+if (typeof window !== 'undefined') {
+  purgeLegacyProvidedExcel()
+  initCRMExcelData()
+}
 
 // ---------- Auth ----------
 export interface AppUser {
@@ -51,33 +165,51 @@ export interface AppUser {
 }
 
 export const DEFAULT_USERS: AppUser[] = [
-  { id: 'user-ajinkya', email: 'ajinkya@gcarbon.in', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
-  { id: 'user-himanshi', email: 'himanshi@gcarbon.in', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123', avatar: '/avatars/himanshi-face.jpg' },
-  { id: 'user-tamanna', email: 'tamanna@gcarbon.in', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123', avatar: '/avatars/tamanna-face.jpg' },
-  { id: 'user-ankesh', email: 'ankesh@gcarbon.in', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: 'gcarbon123', avatar: '/avatars/ankesh-face.jpg' },
-  { id: 'user-aadarsh', email: 'aadarsh@gcarbon.in', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: 'gcarbon123', avatar: '/avatars/aadarsh-face.jpg' },
-  { id: 'user-naresh', email: 'naresh@gcarbon.in', name: 'Naresh', role: 'caller', color: '#FDE047', password: 'gcarbon123', avatar: '/avatars/naresh-face.jpg' },
-  { id: 'user-pranita', email: 'pranita@gcarbon.in', name: 'Pranita', role: 'caller', color: '#F472B6', password: 'gcarbon123', avatar: '/avatars/pranita-face.jpg' },
-  { id: 'user-kunal', email: 'kunal@gcarbon.in', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: 'gcarbon123' },
+  { id: 'user-aadarsh', email: 'aadarsh.gcarbon@gmail.com', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: 'gcarbon123', avatar: '/avatars/aadarsh-face.jpg' },
+  { id: 'user-tamanna', email: 'tamanna.gcarbon@gmail.com', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123', avatar: '/avatars/tamanna-face.jpg' },
+  { id: 'user-naresh', email: 'naresh.gcarbon@gmail.com', name: 'Naresh', role: 'caller', color: '#FDE047', password: 'gcarbon123', avatar: '/avatars/naresh-face.jpg' },
+  { id: 'user-pranita', email: 'pranita.gcarbon@gmail.com', name: 'Pranita', role: 'caller', color: '#F472B6', password: 'gcarbon123', avatar: '/avatars/pranita-face.jpg' },
+  { id: 'user-himanshi', email: 'himanshi.gcarbon@gmail.com', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123', avatar: '/avatars/himanshi-face.jpg' },
+  { id: 'user-ankesh', email: 'ankesh.gcarbon@gmail.com', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: 'gcarbon123', avatar: '/avatars/ankesh-face.jpg' },
+  { id: 'user-kunal', email: 'kunal.gcarbon114@gmail.com', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: 'gcarbon123', avatar: '/avatars/kunal-face.jpg' },
+  { id: 'user-ajinkya', email: 'ajnikya.gcarbon@gmail.com', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
 ]
+
+export function normalizeEmail(email: string): string {
+  return (email || '').trim().toLowerCase().replace('gmail..com', 'gmail.com')
+}
+
+export function isAuthorizedEmployee(email: string): boolean {
+  const norm = normalizeEmail(email)
+  return DEFAULT_USERS.some(u => normalizeEmail(u.email) === norm)
+}
 
 export function getUsers(): AppUser[] {
   const stored = load<AppUser>(KEYS.users)
-  const base = stored.length === 0 ? DEFAULT_USERS : stored
+  // Ensure only whitelisted users are returned, clearing old demo users
+  const hasLegacyDemo = stored.some(u => u.email.endsWith('@gcarbon.in'))
+  const base = stored.length === 0 || hasLegacyDemo ? DEFAULT_USERS : stored
   // Enrich with avatars if missing
   const enriched = base.map(u => {
-    const avatar = u.avatar || DEFAULT_USERS.find(d => d.email.toLowerCase() === u.email.toLowerCase())?.avatar
+    const avatar = u.avatar || DEFAULT_USERS.find(d => normalizeEmail(d.email) === normalizeEmail(u.email))?.avatar
     return { ...u, avatar }
   })
-  if (stored.length === 0) {
+  if (stored.length === 0 || hasLegacyDemo) {
     save(KEYS.users, enriched)
   }
   return enriched
 }
 
-export function login(email: string, password: string): AppUser | null {
+export function login(email: string, password?: string): AppUser | null {
+  const norm = normalizeEmail(email)
   const users = getUsers()
-  return users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password) || null
+  const matched = users.find(u => normalizeEmail(u.email) === norm)
+  if (!matched) return null
+  // In demo/offline mode password check
+  if (password && matched.password && matched.password !== password) {
+    return null
+  }
+  return matched
 }
 
 export function getCurrentUser(): AppUser | null {
@@ -114,51 +246,109 @@ export interface ListDef {
   name: string
   type: 'company' | 'freelancer'
   created_at: string
+  columns?: string[]
 }
 
-const DEFAULT_LISTS: ListDef[] = [
-  { id: 'connection-list', name: 'Connection List', type: 'company', created_at: new Date().toISOString() },
-  { id: 'cold-calling-1', name: 'Cold Calling 1', type: 'company', created_at: new Date().toISOString() },
-  { id: 'cold-calling-2', name: 'Cold Calling 2 (Assoc.)', type: 'company', created_at: new Date().toISOString() },
-  { id: 'new-list', name: 'New List', type: 'company', created_at: new Date().toISOString() },
-  { id: 'data-centres', name: 'Data Centres', type: 'company', created_at: new Date().toISOString() },
-  { id: 'kharadi', name: 'Kharadi', type: 'company', created_at: new Date().toISOString() },
-  { id: 'ranjangaon', name: 'Ranjangaon', type: 'company', created_at: new Date().toISOString() },
-  { id: 'bhosari', name: 'Bhosari', type: 'company', created_at: new Date().toISOString() },
-  { id: 'chakan', name: 'Chakan', type: 'company', created_at: new Date().toISOString() },
-  { id: 'freelancers', name: 'Freelancers', type: 'freelancer', created_at: new Date().toISOString() },
-]
-
 export function getLists(): ListDef[] {
-  const stored = load<ListDef>(KEYS.lists)
-  if (stored.length === 0) {
-    save(KEYS.lists, DEFAULT_LISTS)
-    return DEFAULT_LISTS
-  }
-  return stored
+  purgeLegacyProvidedExcel()
+  return load<ListDef>(KEYS.lists).filter(
+    l => !LEGACY_PRESET_IDS.has(l.id) && l.name.toLowerCase() !== 'connection list'
+  )
 }
 
 export function addList(name: string, type: 'company' | 'freelancer' = 'company'): ListDef {
   const lists = getLists()
+  const baseId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sheet'
+  let uniqueId = baseId
+  let counter = 1
+  while (lists.some(l => l.id === uniqueId)) {
+    uniqueId = `${baseId}-${counter++}`
+  }
   const newList: ListDef = {
-    id: name.toLowerCase().replace(/\s+/g, '-'),
+    id: uniqueId,
     name,
     type,
     created_at: new Date().toISOString(),
   }
   save(KEYS.lists, [...lists, newList])
+  persistRemoteWrite('list upsert', () => supabase.from('lists').upsert(newList, { onConflict: 'id' }))
+  notifyDataChanged('add-list')
   return newList
 }
 
+export function setListColumns(id: string, columns: string[], renamedColumns: Record<string, string> = {}): void {
+  const normalized = [...new Set(columns.map(column => column.trim()).filter(Boolean))]
+  const lists = getLists().map(list => list.id === id ? { ...list, columns: normalized } : list)
+  save(KEYS.lists, lists)
+  const updatedList = lists.find(list => list.id === id)
+  if (updatedList) persistRemoteWrite('list columns update', () => supabase.from('lists').upsert(updatedList, { onConflict: 'id' }))
+
+  const companies = load<Company>(KEYS.companies)
+  const updatedCompanies = companies.map(company => {
+    if (company.list_id !== id || !company.custom_fields) return company
+    const customFields: Record<string, string> = {}
+    for (const [oldName, value] of Object.entries(company.custom_fields)) {
+      const name = renamedColumns[oldName] || oldName
+      if (normalized.includes(name)) customFields[name] = value
+    }
+    return { ...company, custom_fields: customFields }
+  })
+  save(KEYS.companies, updatedCompanies)
+  for (let index = 0; index < updatedCompanies.length; index++) {
+    const company = updatedCompanies[index]
+    if (company.list_id === id && company !== companies[index]) {
+      persistRemoteWrite('company custom-field update', () => supabase.from('companies').upsert(company, { onConflict: 'id' }))
+    }
+  }
+}
+
+export function deleteList(id: string, deleteCompanies: boolean = true): void {
+  const lists = getLists().filter(l => l.id !== id)
+  save(KEYS.lists, lists)
+  persistRemoteWrite('list delete', () => supabase.from('lists').delete().eq('id', id))
+  if (deleteCompanies) {
+    const companies = load<Company>(KEYS.companies).filter(c => c.list_id !== id)
+    save(KEYS.companies, companies)
+    persistRemoteWrite('list company delete', () => supabase.from('companies').delete().eq('list_id', id))
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gc:data-changed'))
+  }
+}
+
+export function clearListCompanies(listId: string): void {
+  const companies = load<Company>(KEYS.companies).filter(c => c.list_id !== listId)
+  save(KEYS.companies, companies)
+  persistRemoteWrite('list company clear', () => supabase.from('companies').delete().eq('list_id', listId))
+  notifyDataChanged('clear-list')
+}
+
+export function renameList(id: string, newName: string): ListDef | null {
+  const lists = getLists()
+  const idx = lists.findIndex(l => l.id === id)
+  if (idx < 0) return null
+  lists[idx] = { ...lists[idx], name: newName }
+  save(KEYS.lists, lists)
+  persistRemoteWrite('list rename', () => supabase.from('lists').upsert(lists[idx], { onConflict: 'id' }))
+  notifyDataChanged('rename-list')
+  return lists[idx]
+}
+
+
 // ---------- Companies ----------
 export function getCompanies(listId?: string): Company[] {
-  const all = load<Company>(KEYS.companies)
-  if (listId && listId !== 'all') return all.filter(c => c.list_id === listId)
+  purgeLegacyProvidedExcel()
+  const all = load<Company>(KEYS.companies).filter(
+    c => !LEGACY_PRESET_IDS.has(c.list_id) && (!c.workspace_id || !LEGACY_PRESET_IDS.has(c.workspace_id))
+  )
+  if (listId && listId !== 'all') {
+    return all.filter(c => (c.workspace_id && c.workspace_id === listId) || c.list_id === listId)
+  }
   return all
 }
 
 export function getCompanyById(id: string): Company | undefined {
-  return load<Company>(KEYS.companies).find(c => c.id === id)
+  return getCompanies().find(c => c.id === id)
 }
 
 export function addCompany(data: Omit<Company, 'id' | 'created_at'>): Company {
@@ -167,8 +357,15 @@ export function addCompany(data: Omit<Company, 'id' | 'created_at'>): Company {
     id: genId(),
     created_at: new Date().toISOString(),
     ...data,
+    workspace_id: data.workspace_id || data.list_id,
   }
   save(KEYS.companies, [...companies, company])
+  persistRemoteWrite('company upsert', () => supabase.from('companies').upsert(company, { onConflict: 'id' }))
+  if (company.custom_fields && Object.keys(company.custom_fields).length > 0) {
+    const list = getLists().find(item => item.id === company.list_id)
+    setListColumns(company.list_id, [...(list?.columns || []), ...Object.keys(company.custom_fields)])
+  }
+  notifyDataChanged('add-company')
   return company
 }
 
@@ -178,15 +375,21 @@ export function updateCompany(id: string, data: Partial<Company>): Company | nul
   if (idx < 0) return null
   companies[idx] = { ...companies[idx], ...data }
   save(KEYS.companies, companies)
+  persistRemoteWrite('company update', () => supabase.from('companies').upsert(companies[idx], { onConflict: 'id' }))
+  notifyDataChanged('update-company')
   return companies[idx]
 }
 
 export function deleteCompany(id: string): void {
   save(KEYS.companies, load<Company>(KEYS.companies).filter(c => c.id !== id))
+  save(KEYS.contacts, load<Contact>(KEYS.contacts).filter(c => c.company_id !== id))
+  save(KEYS.call_logs, load<CallLog>(KEYS.call_logs).filter(l => l.company_id !== id))
+  persistRemoteWrite('company delete', () => supabase.from('companies').delete().eq('id', id))
+  notifyDataChanged('delete-company')
 }
 
 export function checkDuplicateCompany(name: string, phones: string[]): Company | null {
-  const all = load<Company>(KEYS.companies)
+  const all = getCompanies()
   const normName = name.toLowerCase().trim()
   
   // Check by name similarity
@@ -221,6 +424,8 @@ export function addContact(data: Omit<Contact, 'id'>): Contact {
   const contacts = load<Contact>(KEYS.contacts)
   const contact: Contact = { id: genId(), ...data }
   save(KEYS.contacts, [...contacts, contact])
+  persistRemoteWrite('contact upsert', () => supabase.from('contacts').upsert(contact, { onConflict: 'id' }))
+  notifyDataChanged('add-contact')
   return contact
 }
 
@@ -230,6 +435,8 @@ export function updateContact(id: string, data: Partial<Contact>): Contact | nul
   if (idx < 0) return null
   contacts[idx] = { ...contacts[idx], ...data }
   save(KEYS.contacts, contacts)
+  persistRemoteWrite('contact update', () => supabase.from('contacts').upsert(contacts[idx], { onConflict: 'id' }))
+  notifyDataChanged('update-contact')
   return contacts[idx]
 }
 
@@ -247,26 +454,57 @@ export function addCallLog(data: Omit<CallLog, 'id'>): CallLog {
   const log: CallLog = { id: genId(), ...data }
   logs.push(log)
   save(KEYS.call_logs, logs)
+  persistRemoteWrite('call log upsert', () => supabase.from('call_logs').upsert(log, { onConflict: 'id' }))
   
-  // Update company status
+  // Update company status using derived logic
   const companies = load<Company>(KEYS.companies)
   const compIdx = companies.findIndex(c => c.id === data.company_id)
   if (compIdx >= 0) {
-    let status: CompanyStatus = outcomeToStatus(data.outcome)
-    // If follow-up date is set and in the future, override to Follow-up Due
-    if (data.follow_up_date) {
-      const fDate = new Date(data.follow_up_date)
-      const today = new Date()
-      if (fDate >= today && status !== 'Meeting Set' && status !== 'Won/Interested') {
-        status = 'Follow-up Due'
-      }
-    }
+    const status: CompanyStatus = outcomeToStatus(data.outcome, data.follow_up_date)
     companies[compIdx].status = status
     save(KEYS.companies, companies)
+    persistRemoteWrite('call status update', () => supabase.from('companies').upsert(companies[compIdx], { onConflict: 'id' }))
   }
 
+  notifyDataChanged('add-call-log')
   return log
 }
+
+export function updateCallLog(id: string, data: Partial<CallLog>): CallLog | null {
+  const logs = load<CallLog>(KEYS.call_logs)
+  const idx = logs.findIndex(l => l.id === id)
+  if (idx < 0) return null
+  logs[idx] = { ...logs[idx], ...data }
+  save(KEYS.call_logs, logs)
+  persistRemoteWrite('call log update', () => supabase.from('call_logs').upsert(logs[idx], { onConflict: 'id' }))
+  notifyDataChanged('update-call-log')
+  return logs[idx]
+}
+
+export function deleteCallLog(id: string): void {
+  const logs = load<CallLog>(KEYS.call_logs)
+  const target = logs.find(l => l.id === id)
+  if (!target) return
+  const remaining = logs.filter(l => l.id !== id)
+  save(KEYS.call_logs, remaining)
+  persistRemoteWrite('call log delete', () => supabase.from('call_logs').delete().eq('id', id))
+
+  // Recompute company status from previous log
+  const companies = load<Company>(KEYS.companies)
+  const compIdx = companies.findIndex(c => c.id === target.company_id)
+  if (compIdx >= 0) {
+    const compLogs = remaining.filter(l => l.company_id === target.company_id).sort((a, b) => 
+      new Date(b.called_at).getTime() - new Date(a.called_at).getTime()
+    )
+    const prevLog = compLogs[0]
+    companies[compIdx].status = prevLog ? outcomeToStatus(prevLog.outcome, prevLog.follow_up_date) : 'Not Called'
+    save(KEYS.companies, companies)
+    persistRemoteWrite('call status update', () => supabase.from('companies').upsert(companies[compIdx], { onConflict: 'id' }))
+  }
+
+  notifyDataChanged('delete-call-log')
+}
+
 
 export function getLastCallLog(companyId: string): CallLog | undefined {
   return getCallLogs(companyId)[0]
@@ -287,6 +525,8 @@ export function addTask(data: Omit<Task, 'id' | 'created_at'>): Task {
     ...data,
   }
   save(KEYS.tasks, [...tasks, task])
+  persistRemoteWrite('task upsert', () => supabase.from('tasks').upsert(task, { onConflict: 'id' }))
+  notifyDataChanged('add-task')
   return task
 }
 
@@ -296,11 +536,15 @@ export function updateTask(id: string, data: Partial<Task>): Task | null {
   if (idx < 0) return null
   tasks[idx] = { ...tasks[idx], ...data }
   save(KEYS.tasks, tasks)
+  persistRemoteWrite('task update', () => supabase.from('tasks').upsert(tasks[idx], { onConflict: 'id' }))
+  notifyDataChanged('update-task')
   return tasks[idx]
 }
 
 export function deleteTask(id: string): void {
   save(KEYS.tasks, load<Task>(KEYS.tasks).filter(t => t.id !== id))
+  persistRemoteWrite('task delete', () => supabase.from('tasks').delete().eq('id', id))
+  notifyDataChanged('delete-task')
 }
 
 // ---------- Notes ----------
@@ -322,6 +566,8 @@ export function addNote(data: Omit<Note, 'id' | 'updated_at'>): Note {
     ...data,
   }
   save(KEYS.notes, [...notes, note])
+  persistRemoteWrite('note upsert', () => supabase.from('notes').upsert(note, { onConflict: 'id' }))
+  notifyDataChanged('add-note')
   return note
 }
 
@@ -331,11 +577,15 @@ export function updateNote(id: string, data: Partial<Note>): Note | null {
   if (idx < 0) return null
   notes[idx] = { ...notes[idx], ...data, updated_at: new Date().toISOString() }
   save(KEYS.notes, notes)
+  persistRemoteWrite('note update', () => supabase.from('notes').upsert(notes[idx], { onConflict: 'id' }))
+  notifyDataChanged('update-note')
   return notes[idx]
 }
 
 export function deleteNote(id: string): void {
   save(KEYS.notes, load<Note>(KEYS.notes).filter(n => n.id !== id))
+  persistRemoteWrite('note delete', () => supabase.from('notes').delete().eq('id', id))
+  notifyDataChanged('delete-note')
 }
 
 // ---------- Calendar Events ----------
@@ -349,6 +599,17 @@ export function addEvent(data: Omit<CalendarEvent, 'id'>): CalendarEvent {
   const events = load<CalendarEvent>(KEYS.events)
   const event: CalendarEvent = { id: genId(), ...data }
   save(KEYS.events, [...events, event])
+  persistRemoteWrite('calendar event upsert', () => supabase.from('calendar_events').upsert({
+    id: event.id,
+    title: event.title,
+    start_at: event.start,
+    end_at: event.end || null,
+    type: event.type,
+    company_id: event.company_id ?? null,
+    owner_id: event.owner_id,
+    all_day: event.all_day ?? false,
+  }, { onConflict: 'id' }))
+  notifyDataChanged('add-event')
   return event
 }
 
@@ -358,11 +619,25 @@ export function updateEvent(id: string, data: Partial<CalendarEvent>): CalendarE
   if (idx < 0) return null
   events[idx] = { ...events[idx], ...data }
   save(KEYS.events, events)
+  const event = events[idx]
+  persistRemoteWrite('calendar event update', () => supabase.from('calendar_events').upsert({
+    id: event.id,
+    title: event.title,
+    start_at: event.start,
+    end_at: event.end || null,
+    type: event.type,
+    company_id: event.company_id ?? null,
+    owner_id: event.owner_id,
+    all_day: event.all_day ?? false,
+  }, { onConflict: 'id' }))
+  notifyDataChanged('update-event')
   return events[idx]
 }
 
 export function deleteEvent(id: string): void {
   save(KEYS.events, load<CalendarEvent>(KEYS.events).filter(e => e.id !== id))
+  persistRemoteWrite('calendar event delete', () => supabase.from('calendar_events').delete().eq('id', id))
+  notifyDataChanged('delete-event')
 }
 
 // ---------- Metrics ----------
@@ -376,15 +651,16 @@ export interface DashboardMetrics {
   conversionRate: number
   outcomeBreakdown: Record<OutcomeType, number>
   dailyCalls: { day: string; calls: number; conversions: number }[]
-  leaderboard: { name: string; calls: number; connected: number; meetings: number; color: string }[]
+  leaderboard: { name: string; calls: number; connected: number; meetings: number; connectRate?: number; color: string }[]
 }
+
 
 export function getDashboardMetrics(userId: string, periodDays: number = 7): DashboardMetrics {
   const logs = load<CallLog>(KEYS.call_logs)
   const companies = load<Company>(KEYS.companies)
-  const now = new Date()
-  const todayStr = now.toISOString().split('T')[0]
+  const todayStr = getISTDateStr()
   
+  const now = new Date()
   const weekAgo = new Date(now)
   weekAgo.setDate(weekAgo.getDate() - periodDays)
 
@@ -405,7 +681,7 @@ export function getDashboardMetrics(userId: string, periodDays: number = 7): Das
     const log = logs.filter(l => l.company_id === c.id).sort((a,b) => 
       new Date(b.called_at).getTime() - new Date(a.called_at).getTime()
     )[0]
-    return log?.follow_up_date && new Date(log.follow_up_date) < now && log.follow_up_date !== todayStr
+    return log?.follow_up_date && log.follow_up_date < todayStr
   }).length
 
   const meetingsThisWeek = logs.filter(l => 
@@ -431,33 +707,47 @@ export function getDashboardMetrics(userId: string, periodDays: number = 7): Das
     outcomeBreakdown[log.outcome] = (outcomeBreakdown[log.outcome] || 0) + 1
   }
 
-  // Daily calls (last 7 days)
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const dailyCalls = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now)
-    d.setDate(d.getDate() - (6 - i))
-    const dateStr = d.toISOString().split('T')[0]
+  // Daily calls based on periodDays (7, 14, 30)
+  const dailyCalls = Array.from({ length: periodDays }, (_, i) => {
+    const dateStr = addDaysIST(-(periodDays - 1 - i))
+    const d = new Date(dateStr + 'T12:00:00+05:30')
     const dayLogs = logs.filter(l => l.called_at.startsWith(dateStr))
     const dayConv = dayLogs.filter(l => l.outcome === 'Connected - Interested' || l.outcome === 'Meeting Scheduled').length
+    
+    let dayLabel = ''
+    if (periodDays <= 7) {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      dayLabel = days[d.getDay()]
+    } else {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      dayLabel = `${d.getDate()} ${months[d.getMonth()]}`
+    }
+
     return {
-      day: days[d.getDay() === 0 ? 6 : d.getDay() - 1],
+      day: dayLabel,
       calls: dayLogs.length,
       conversions: dayConv,
     }
   })
 
-  // Leaderboard
+  // Leaderboard with calls, connected, meetings and connectRate
   const users = getUsers()
   const leaderboard = users.map(user => {
     const userLogs = logs.filter(l => l.caller_id === user.id)
+    const calls = userLogs.length
+    const conn = userLogs.filter(l => l.outcome !== 'Not Picked' && l.outcome !== 'Not Reachable / Out of Service' && l.outcome !== 'Not Called' && l.outcome !== 'Invalid Number').length
+    const meetings = userLogs.filter(l => l.outcome === 'Meeting Scheduled').length
+    const connectRate = calls > 0 ? Math.round((conn / calls) * 100) : 0
     return {
       name: user.name,
-      calls: userLogs.length,
-      connected: userLogs.filter(l => l.outcome !== 'Not Picked' && l.outcome !== 'Not Reachable / Out of Service' && l.outcome !== 'Not Called' && l.outcome !== 'Invalid Number').length,
-      meetings: userLogs.filter(l => l.outcome === 'Meeting Scheduled').length,
+      calls,
+      connected: conn,
+      meetings,
+      connectRate,
       color: user.color,
     }
   }).sort((a, b) => b.calls - a.calls)
+
 
   return {
     callsToday,
@@ -473,18 +763,15 @@ export function getDashboardMetrics(userId: string, periodDays: number = 7): Das
   }
 }
 
-// ---------- Seeding ----------
-export function isSeeded(): boolean {
-  if (typeof window === 'undefined') return false
-  return localStorage.getItem(KEYS.seeded) === 'true'
-}
-
-export function markSeeded(): void {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(KEYS.seeded, 'true')
-}
 
 export function clearAllData(): void {
   if (typeof window === 'undefined') return
   Object.values(KEYS).forEach(k => localStorage.removeItem(k))
 }
+
+
+
+
+
+
+

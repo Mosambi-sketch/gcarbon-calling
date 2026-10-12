@@ -1,7 +1,7 @@
-'use client'
 import { useState, useEffect, useCallback } from 'react'
 import type { AppUser } from '@/lib/store'
-import { setCurrentUser, isSeeded, markSeeded, DEFAULT_USERS, getLists } from '@/lib/store'
+import { subscribeRealtime, syncFromSupabase } from '@/lib/db'
+import { isSupabaseReady } from '@/lib/supabase'
 import Sidebar from './Sidebar'
 import DashboardPage from './pages/DashboardPage'
 import CallingSheetPage from './pages/CallingSheetPage'
@@ -18,37 +18,33 @@ interface AppShellProps {
 }
 
 export default function AppShell({ user, onLogout }: AppShellProps) {
-  const [page, setPage] = useState<NavPage>('dashboard')
-  const [seedReady, setSeedReady] = useState(false)
-  const [seeding, setSeeding] = useState(false)
+  const [page, setPage] = useState<NavPage>('calling')
+  const [workspaceReady, setWorkspaceReady] = useState(false)
 
-  // Auto-seed on first load
   useEffect(() => {
-    if (!isSeeded()) {
-      setSeeding(true)
-      // Load seed data from the API
-      fetch('/api/seed').then(r => r.json()).then(data => {
-        if (data.ok && data.data) {
-          // Write seed data to localStorage
-          const seed = data.data
-          localStorage.setItem('gc_companies', JSON.stringify(seed.companies || []))
-          localStorage.setItem('gc_contacts', JSON.stringify(seed.contacts || []))
-          localStorage.setItem('gc_call_logs', JSON.stringify(seed.call_logs || []))
-          localStorage.setItem('gc_tasks', JSON.stringify(seed.tasks || []))
-          localStorage.setItem('gc_notes', JSON.stringify(seed.notes || []))
-          localStorage.setItem('gc_events', JSON.stringify(seed.events || []))
-        }
-        markSeeded()
-        setSeedReady(true)
-        setSeeding(false)
-      }).catch(() => {
-        markSeeded()
-        setSeedReady(true)
-        setSeeding(false)
-      })
-    } else {
-      setSeedReady(true)
+    let cancelled = false
+    async function initData() {
+      try {
+        await syncFromSupabase()
+      } catch (error) {
+        console.error('Workspace initialization failed:', error)
+      } finally {
+        if (!cancelled) setWorkspaceReady(true)
+      }
     }
+    void initData()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => subscribeRealtime(), [])
+
+
+  // Re-render when Supabase realtime fires
+  const [, forceUpdate] = useState(0)
+  useEffect(() => {
+    const handler = () => forceUpdate(n => n + 1)
+    window.addEventListener('gc:data-changed', handler)
+    return () => window.removeEventListener('gc:data-changed', handler)
   }, [])
 
   // Keyboard shortcuts
@@ -73,29 +69,38 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  const [mongoStatus, setMongoStatus] = useState<{ connected: boolean; uriConfigured: boolean } | null>(null)
+
+  useEffect(() => {
+    const checkHealth = () => {
+      fetch('/api/health')
+        .then(res => res.json())
+        .then(data => {
+          if (data?.mongodb) {
+            setMongoStatus({
+              connected: Boolean(data.mongodb.connected),
+              uriConfigured: Boolean(data.mongodb.uriConfigured),
+            })
+          }
+        })
+        .catch(() => {
+          setMongoStatus({ connected: false, uriConfigured: false })
+        })
+    }
+    checkHealth()
+    const timer = setInterval(checkHealth, 15000)
+    return () => clearInterval(timer)
+  }, [])
+
   const handleLogout = useCallback(() => {
-    setCurrentUser(null)
+    // signOut is handled in App.tsx / db.ts
     onLogout()
   }, [onLogout])
 
-  if (seeding) {
+  if (!workspaceReady) {
     return (
-      <div style={{
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        height: '100vh', background: '#EFEFEF', gap: 16,
-      }}>
-        <div style={{
-          width: 52, height: 52,
-          background: '#0B0B0B',
-          borderRadius: 16,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#D9F56B',
-          fontWeight: 800,
-          fontSize: 20,
-        }}>GC</div>
-        <div className="spinner" style={{ width: 28, height: 28 }} />
-        <div style={{ fontSize: 13, color: '#888' }}>Loading your data...</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#EFEFEF' }}>
+        <div className="spinner" style={{ width: 32, height: 32 }} />
       </div>
     )
   }

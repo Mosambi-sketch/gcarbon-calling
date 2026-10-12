@@ -1,14 +1,18 @@
+import { syncLeadToExcel, downloadLiveExcelFile, deleteLeadFromExcel } from '@/lib/excel-live-sync'
 'use client'
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import type { AppUser } from '@/lib/store'
 import {
   getCompanies, getContacts, getCallLogs, getLists, addCallLog, addCompany, addContact,
-  addTask, addEvent, getUserByName, getUserById, getUsers, isSeeded
+  addTask, addEvent, getUserByName, getUserById, getUsers,
+  updateCompany, updateContact, updateCallLog, deleteCompany
 } from '@/lib/store'
 import type { Company, Contact, CallLog, OutcomeType } from '@/lib/types'
 import { OUTCOMES, getStatusColor, getInitials, getAvatarColor, getAvatar } from '@/lib/types'
 import { format, addDays, isToday, isPast } from 'date-fns'
 import LogCallDrawer from '../LogCallDrawer'
+import toast from 'react-hot-toast'
+import { syncFromSupabase } from '@/lib/db'
 
 interface Row {
   company: Company
@@ -39,6 +43,385 @@ function getStatusTextColor(status: string) {
   }
 }
 
+// ── Inline Editable Cell ────────────────────────────────────────────────
+function EditableCell({
+  value,
+  onSave,
+  style,
+  placeholder = '—',
+  type = 'text',
+}: {
+  value: string
+  onSave: (val: string) => void
+  style?: React.CSSProperties
+  placeholder?: string
+  type?: 'text' | 'tel'
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setDraft(value)
+  }, [value])
+
+  useEffect(() => {
+    if (editing) {
+      setTimeout(() => {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }, 0)
+    }
+  }, [editing])
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed !== value) {
+      onSave(trimmed)
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%' }}>
+        <input
+          ref={inputRef}
+          type={type}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commit()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+          style={{
+            width: '100%',
+            fontSize: 12,
+            fontWeight: 500,
+            padding: '4px 8px',
+            border: '1.5px solid #0B0B0B',
+            borderRadius: 6,
+            outline: 'none',
+            background: '#FAFFF0',
+            boxShadow: '0 0 0 3px rgba(217,245,107,0.3)',
+            fontFamily: 'inherit',
+            ...style,
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      onClick={e => {
+        e.stopPropagation()
+        setEditing(true)
+      }}
+      onTouchEnd={e => {
+        e.stopPropagation()
+        setEditing(true)
+      }}
+      title="Touch or click to edit"
+      style={{
+        fontSize: 12,
+        color: value ? '#111827' : '#9CA3AF',
+        cursor: 'pointer',
+        padding: '3px 6px',
+        borderRadius: 6,
+        minHeight: 24,
+        display: 'inline-flex',
+        alignItems: 'center',
+        transition: 'all 0.15s ease',
+        border: '1px solid transparent',
+        ...style,
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = '#F3F4F6'
+        e.currentTarget.style.borderColor = '#D9F56B'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.borderColor = 'transparent'
+      }}
+    >
+      {value || <span style={{ color: '#9CA3AF', fontStyle: 'italic' }}>{placeholder}</span>}
+    </div>
+  )
+}
+
+// ── Status Dropdown ─────────────────────────────────────────────────────
+const ALL_STATUSES = ['Not Called', 'In Progress', 'Follow-up Due', 'Meeting Set', 'Won/Interested', 'Dead']
+
+function StatusCell({
+  status,
+  onSave,
+}: {
+  status: string
+  onSave: (val: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <span
+        onClick={e => { e.stopPropagation(); setOpen(!open) }}
+        title="Click to change status"
+        style={{
+          display: 'inline-flex', alignItems: 'center',
+          padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+          background: getStatusBg(status),
+          color: getStatusTextColor(status),
+          cursor: 'pointer',
+          transition: 'all 0.15s ease',
+          border: '1px solid transparent',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#D9F56B' }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'transparent' }}
+      >
+        {status}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ marginLeft: 4 }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </span>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 4,
+          background: '#fff', borderRadius: 10, boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
+          border: '1px solid #E5E5E5', zIndex: 100, minWidth: 160, padding: 4,
+          animation: 'fadeIn 0.12s ease',
+        }}>
+          {ALL_STATUSES.map(s => (
+            <div
+              key={s}
+              onClick={e => { e.stopPropagation(); onSave(s); setOpen(false) }}
+              style={{
+                padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8,
+                background: s === status ? '#F5F5F5' : 'transparent',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#F0F0F0' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = s === status ? '#F5F5F5' : 'transparent' }}
+            >
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: getStatusTextColor(s),
+                flexShrink: 0,
+              }} />
+              <span style={{ color: getStatusTextColor(s) }}>{s}</span>
+              {s === status && <span style={{ marginLeft: 'auto', color: '#16A34A', fontSize: 14 }}>✓</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+const TEAM_CALLERS = [
+  'Ankesh', 'Kunal', 'Aadarsh', 'Himanshi', 'Pranita', 'Tamanna', 'Naresh', 'Ajinkya', 'Anupam Sir', 'Aprmay Sir'
+]
+
+function CallerCell({
+  caller,
+  onSave,
+}: {
+  caller?: string
+  onSave: (val: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      setSearch('')
+      return
+    }
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    setTimeout(() => inputRef.current?.focus(), 50)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const isValidCaller = Boolean(
+    caller &&
+    !caller.toLowerCase().includes('reference') &&
+    caller.toLowerCase() !== 'caller' &&
+    caller.trim().length > 0
+  )
+
+  const filteredTeam = TEAM_CALLERS.filter(c => 
+    c.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const isCustomMatch = search.trim() && !TEAM_CALLERS.some(c => c.toLowerCase() === search.trim().toLowerCase())
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+      <span
+        onClick={() => setOpen(!open)}
+        title="Touch or click to assign caller"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '3px 8px', borderRadius: 6, fontSize: 12, fontWeight: 500,
+          cursor: 'pointer', transition: 'all 0.15s ease',
+          background: isValidCaller ? '#F8FAFC' : 'transparent',
+          border: isValidCaller ? '1px solid #E2E8F0' : '1px dashed #CBD5E1',
+          maxWidth: 130,
+        }}
+        onMouseEnter={e => { 
+          (e.currentTarget as HTMLElement).style.background = '#F1F5F9'; 
+          (e.currentTarget as HTMLElement).style.borderColor = '#D9F56B' 
+        }}
+        onMouseLeave={e => { 
+          (e.currentTarget as HTMLElement).style.background = isValidCaller ? '#F8FAFC' : 'transparent'; 
+          (e.currentTarget as HTMLElement).style.borderColor = isValidCaller ? '#E2E8F0' : '1px dashed #CBD5E1' 
+        }}
+      >
+        {isValidCaller ? (
+          <>
+            {getAvatar(caller!) ? (
+              <img
+                src={getAvatar(caller!)}
+                alt={caller}
+                style={{ width: 18, height: 18, borderRadius: '50%', objectFit: 'cover', border: '1px solid #E2E8F0', flexShrink: 0 }}
+              />
+            ) : (
+              <div style={{
+                width: 18, height: 18, borderRadius: '50%',
+                background: getAvatarColor(caller!),
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 8, fontWeight: 700, color: '#0B0B0B', flexShrink: 0
+              }}>
+                {getInitials(caller!)}
+              </div>
+            )}
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {caller}
+            </span>
+          </>
+        ) : (
+          <span style={{ color: '#94A3B8', fontSize: 11, fontStyle: 'italic', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <span>+</span> Assign
+          </span>
+        )}
+      </span>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 4,
+          background: '#FFFFFF', borderRadius: 10, boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+          border: '1px solid #E2E8F0', zIndex: 120, minWidth: 190, padding: 6,
+          animation: 'fadeIn 0.12s ease',
+        }}>
+          {/* Search or custom caller input */}
+          <div style={{ marginBottom: 6, padding: '2px 4px' }}>
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Filter or type caller..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && search.trim()) {
+                  onSave(search.trim())
+                  setOpen(false)
+                } else if (e.key === 'Escape') {
+                  setOpen(false)
+                }
+              }}
+              style={{
+                width: '100%', fontSize: 11, padding: '4px 8px',
+                border: '1px solid #CBD5E1', borderRadius: 6, outline: 'none',
+                background: '#F8FAFC', fontFamily: 'inherit'
+              }}
+            />
+          </div>
+
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {/* Clear option */}
+            <div
+              onClick={() => { onSave(''); setOpen(false) }}
+              style={{
+                padding: '5px 8px', borderRadius: 6, cursor: 'pointer',
+                fontSize: 11, color: '#DC2626', display: 'flex', alignItems: 'center', gap: 6,
+                marginBottom: 4, background: '#FEF2F2'
+              }}
+            >
+              <span>✕</span>
+              <span>Unassign caller</span>
+            </div>
+
+            {/* Custom entered name option */}
+            {isCustomMatch && (
+              <div
+                onClick={() => { onSave(search.trim()); setOpen(false) }}
+                style={{
+                  padding: '6px 8px', borderRadius: 6, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 600, color: '#0B0B0B',
+                  background: '#D9F56B', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6
+                }}
+              >
+                <span>✓</span>
+                <span>Assign as "{search.trim()}"</span>
+              </div>
+            )}
+
+            {/* Team callers */}
+            {filteredTeam.map(c => {
+              const isSelected = isValidCaller && c.toLowerCase() === (caller || '').toLowerCase()
+              return (
+                <div
+                  key={c}
+                  onClick={() => {
+                    onSave(c)
+                    setOpen(false)
+                  }}
+                  style={{
+                    padding: '5px 8px', borderRadius: 6, cursor: 'pointer',
+                    fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8,
+                    background: isSelected ? '#F1F5F9' : 'transparent',
+                    transition: 'background 0.1s ease',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#F8FAFC' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isSelected ? '#F1F5F9' : 'transparent' }}
+                >
+                  {getAvatar(c) ? (
+                    <img src={getAvatar(c)} alt={c} style={{ width: 18, height: 18, borderRadius: '50%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: getAvatarColor(c), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700 }}>
+                      {getInitials(c)}
+                    </div>
+                  )}
+                  <span>{c}</span>
+                  {isSelected && <span style={{ marginLeft: 'auto', color: '#16A34A', fontSize: 13, fontWeight: 700 }}>✓</span>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function CallingSheetPage({ user }: { user: AppUser }) {
   const [listId, setListId] = useState('all')
   const [rows, setRows] = useState<Row[]>([])
@@ -60,6 +443,19 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
     sector: '', location: '', listId: 'connection-list',
   })
   const [addingSaving, setAddingSaving] = useState(false)
+  const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  // SharePoint Live Continuous Sync State
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [lastSyncedText, setLastSyncedText] = useState('Continuous active')
+  const [sharePointUrl, setSharePointUrl] = useState(
+    'https://sbupune-my.sharepoint.com/:x:/g/personal/pranita_bba2403084_sbup_edu_in/IQBFjWY_vTVNQq-lYSE-oyz1AV8QWYOnL7f13UUt8koDqtk?e=wCEXaW'
+  )
+  const [showSharePointModal, setShowSharePointModal] = useState(false)
+  const [customUrlInput, setCustomUrlInput] = useState(
+    'https://sbupune-my.sharepoint.com/:x:/g/personal/pranita_bba2403084_sbup_edu_in/IQBFjWY_vTVNQq-lYSE-oyz1AV8QWYOnL7f13UUt8koDqtk?e=wCEXaW'
+  )
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -96,6 +492,79 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
   }, [listId])
 
   useEffect(() => { loadData() }, [loadData])
+
+  const handleSyncSharePoint = useCallback(async (notify = true) => {
+    setIsSyncing(true)
+    let toastId = undefined
+    if (notify) {
+      toastId = toast.loading('Syncing latest updates from SharePoint Excel...')
+    }
+    try {
+      const res = await fetch('/api/sync/sharepoint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: sharePointUrl }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        await syncFromSupabase()
+        setLists(getLists())
+        loadData()
+        const now = new Date()
+        setLastSyncedText('Synced ' + format(now, 'h:mm a'))
+        if (notify && toastId) {
+          toast.success(`Synced live Excel! ${data.totalCompanies || 0} companies updated.`, { id: toastId })
+        }
+      } else {
+        if (notify && toastId) {
+          toast.error(data.error || 'SharePoint sync failed', { id: toastId })
+        }
+      }
+    } catch (err) {
+      console.warn('SharePoint sync error:', err)
+      if (notify && toastId) {
+        toast.error('Could not reach backend sync server', { id: toastId })
+      }
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [sharePointUrl, loadData])
+
+  // Initial check of SharePoint sync metadata
+  useEffect(() => {
+    fetch('/api/sync/sharepoint')
+      .then(r => r.json())
+      .then(d => {
+        if (d.last_synced) {
+          const dt = new Date(d.last_synced)
+          setLastSyncedText('Synced ' + format(dt, 'h:mm a'))
+        }
+        if (d.source_url) {
+          setSharePointUrl(d.source_url)
+          setCustomUrlInput(d.source_url)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Continuous background auto-sync every 60s, on tab focus, and on gc:data-changed
+  useEffect(() => {
+    const timer = setInterval(() => {
+      handleSyncSharePoint(false)
+    }, 60 * 1000)
+
+    const onFocus = () => {
+      handleSyncSharePoint(false)
+    }
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('gc:data-changed', loadData)
+
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('gc:data-changed', loadData)
+    }
+  }, [handleSyncSharePoint, loadData])
 
   // Keyboard shortcut: / focuses search, N = next company
   useEffect(() => {
@@ -167,10 +636,133 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
     }
   }
 
+  const handleDeleteCompany = useCallback(async () => {
+    if (!companyToDelete) return
+    setIsDeleting(true)
+    const comp = companyToDelete
+    try {
+      // 1. Delete locally from store
+      deleteCompany(comp.id)
+
+      // 2. Delete from Excel file on time
+      await deleteLeadFromExcel(comp.list_id, comp.name)
+
+      // 3. Delete from backend DB if available
+      fetch(`/api/companies/${comp.id}`, { method: 'DELETE' }).catch(() => {})
+
+      // 4. Close drawer if this company was active
+      if (selectedRow?.company.id === comp.id) {
+        setSelectedRow(null)
+        setDrawerOpen(false)
+      }
+
+      setCompanyToDelete(null)
+      loadData()
+      toast.success(`Deleted "${comp.name}" from CRM & Excel`, { duration: 2500 })
+    } catch (err) {
+      console.error('Delete company error:', err)
+      toast.error('Failed to delete company')
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [companyToDelete, selectedRow, loadData])
+
   const handleLogSaved = () => {
     loadData()
     setDrawerOpen(false)
   }
+
+  // ── Inline edit handlers ────────────────────────────────────────────
+  const handleUpdateCompany = useCallback((companyId: string, field: string, value: string) => {
+    updateCompany(companyId, { [field]: value })
+    const targetRow = rows.find(r => r.company.id === companyId)
+    if (targetRow) {
+      syncLeadToExcel(targetRow.company.list_id, targetRow.company.name, {
+        [field === 'name' ? 'companyName' : field]: value
+      })
+    }
+    loadData()
+    toast.success(`Updated ${field} in CRM & Excel`, { duration: 1500, style: { fontSize: 12 } })
+  }, [rows, loadData])
+
+  const handleUpdateContact = useCallback((contactId: string, field: string, value: string) => {
+    if (field === 'phones') {
+      updateContact(contactId, { phones: value ? [value] : [] })
+    } else {
+      updateContact(contactId, { [field]: value })
+    }
+    const targetRow = rows.find(r => r.primaryContact?.id === contactId)
+    if (targetRow) {
+      syncLeadToExcel(targetRow.company.list_id, targetRow.company.name, {
+        [field === 'name' ? 'contactName' : field === 'phones' ? 'phone' : field]: value
+      })
+    }
+    loadData()
+    toast.success(`Updated ${field} in CRM & Excel`, { duration: 1500, style: { fontSize: 12 } })
+  }, [rows, loadData])
+
+  const handleUpdateCaller = useCallback((companyId: string, callerName: string) => {
+    updateCompany(companyId, { owner_name: callerName || undefined })
+    const existingLogs = getCallLogs(companyId)
+    if (existingLogs.length > 0) {
+      updateCallLog(existingLogs[0].id, { caller_name: callerName || '' })
+    } else if (callerName) {
+      addCallLog({
+        company_id: companyId,
+        caller_name: callerName,
+        outcome: 'Connected - Interested',
+        called_at: new Date().toISOString(),
+      })
+    }
+    const targetRow = rows.find(r => r.company.id === companyId)
+    if (targetRow) {
+      syncLeadToExcel(targetRow.company.list_id, targetRow.company.name, {
+        callerName
+      })
+    }
+    loadData()
+    toast.success(callerName ? `Assigned to ${callerName} & synced to Excel` : 'Unassigned caller', { duration: 1500, style: { fontSize: 12 } })
+  }, [rows, loadData])
+
+  const handleUpdateRemark = useCallback((companyId: string, remark: string) => {
+    addCallLog({
+      company_id: companyId,
+      caller_name: user.name,
+      outcome: 'Connected - Interested',
+      remark,
+      called_at: new Date().toISOString(),
+    })
+    const targetRow = rows.find(r => r.company.id === companyId)
+    if (targetRow) {
+      syncLeadToExcel(targetRow.company.list_id, targetRow.company.name, {
+        remark,
+        callerName: user.name
+      })
+    }
+    loadData()
+    toast.success('Updated remark in CRM & Excel', { duration: 1500, style: { fontSize: 12 } })
+  }, [user.name, rows, loadData])
+
+  const handleAddContactInline = useCallback((companyId: string, field: string, value: string) => {
+    if (!value.trim()) return
+    const newContact: any = {
+      company_id: companyId,
+      name: field === 'name' ? value : 'Contact',
+      is_primary: true,
+      phones: [],
+    }
+    if (field === 'phones') newContact.phones = [value]
+    if (field === 'designation') newContact.designation = value
+    addContact(newContact)
+    const targetRow = rows.find(r => r.company.id === companyId)
+    if (targetRow) {
+      syncLeadToExcel(targetRow.company.list_id, targetRow.company.name, {
+        [field === 'name' ? 'contactName' : field === 'phones' ? 'phone' : field]: value
+      })
+    }
+    loadData()
+    toast.success('Contact added & synced to Excel', { duration: 1500, style: { fontSize: 12 } })
+  }, [rows, loadData])
 
   const allStatuses = ['Not Called', 'In Progress', 'Follow-up Due', 'Meeting Set', 'Won/Interested', 'Dead']
 
@@ -207,6 +799,125 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             + Add Company
           </button>
+
+          {/* Download Live Excel Button */}
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={downloadLiveExcelFile}
+            title="Download the live updated Excel workbook with all recent edits"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#FFFFFF',
+              border: '1px solid #D1D5DB',
+              borderRadius: 8,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#1F2937',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = '#16A34A'
+              e.currentTarget.style.color = '#16A34A'
+              e.currentTarget.style.background = '#F0FDF4'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = '#D1D5DB'
+              e.currentTarget.style.color = '#1F2937'
+              e.currentTarget.style.background = '#FFFFFF'
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>Download Live Excel</span>
+          </button>
+
+          {/* Live Excel Status Pill */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 10px',
+            borderRadius: 20,
+            fontSize: 11,
+            fontWeight: 600,
+            background: '#F0FDF4',
+            color: '#16A34A',
+            border: '1px solid #BBF7D0',
+          }} title="All CRM edits are automatically saved to Excel on time">
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: '#16A34A',
+              boxShadow: '0 0 0 2px rgba(22, 163, 74, 0.25)',
+            }} />
+            <span>Excel live on-time</span>
+          </div>
+
+          {/* Live SharePoint Sync Badge & Controls */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '4px 12px',
+            borderRadius: 20,
+            background: 'var(--surface, #FFFFFF)',
+            border: '1px solid var(--border, #E5E7EB)',
+            fontSize: 12,
+            marginLeft: 'auto',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+          }}>
+            <span style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: isSyncing ? '#F59E0B' : '#10B981',
+              boxShadow: isSyncing ? '0 0 8px #F59E0B' : '0 0 8px #10B981',
+              transition: 'background 0.2s',
+            }} />
+            <span style={{ fontWeight: 600, color: 'var(--text, #111827)', fontSize: 12 }}>
+              {isSyncing ? 'Syncing SharePoint…' : 'SharePoint Live'}
+            </span>
+            <span style={{ color: 'var(--text-muted, #6B7280)', fontSize: 11 }}>
+              • {lastSyncedText}
+            </span>
+            <button
+              onClick={() => handleSyncSharePoint(true)}
+              disabled={isSyncing}
+              className="btn btn-ghost btn-sm"
+              style={{
+                padding: '2px 8px',
+                fontSize: 11,
+                height: 24,
+                borderRadius: 6,
+                fontWeight: 600,
+                color: '#0B0B0B',
+                background: '#F3F4F6'
+              }}
+              title="Pull latest edits from Pranita's SharePoint Excel"
+            >
+              {isSyncing ? '⟳ Syncing' : '⚡ Sync Now'}
+            </button>
+            <button
+              onClick={() => setShowSharePointModal(true)}
+              className="btn btn-ghost btn-sm"
+              style={{
+                padding: '2px 6px',
+                fontSize: 11,
+                height: 24,
+                borderRadius: 6,
+                color: '#6B7280'
+              }}
+              title="SharePoint link details"
+            >
+              ⚙ Source
+            </button>
+          </div>
         </div>
 
         {/* List tabs */}
@@ -324,8 +1035,14 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           </button>
         )}
 
-        <div style={{ marginLeft: 'auto', fontSize: 11, color: '#AAA', whiteSpace: 'nowrap' }}>
-          Press <kbd style={{ background: '#F0F0F0', padding: '1px 5px', borderRadius: 4, fontSize: 10 }}>/</kbd> to search
+        <div style={{ marginLeft: 'auto', fontSize: 11, color: '#AAA', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span title="Touch or click any cell to edit directly" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#F0FFF0', color: '#16A34A', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Editable
+          </span>
+          <span>
+            Press <kbd style={{ background: '#F0F0F0', padding: '1px 5px', borderRadius: 4, fontSize: 10 }}>/</kbd> to search
+          </span>
         </div>
       </div>
 
@@ -340,21 +1057,21 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
             <div style={{ fontSize: 13, color: '#888' }}>Try adjusting your filters</div>
           </div>
         ) : (
-          <table className="data-table" style={{ minWidth: 1100 }}>
+          <table className="data-table" style={{ minWidth: 1200, width: '100%' }}>
             <thead>
               <tr>
-                <th style={{ minWidth: 200 }}>Company</th>
-                <th style={{ minWidth: 150 }}>Contact person</th>
-                <th style={{ minWidth: 120 }}>Designation</th>
-                <th style={{ minWidth: 120 }}>Phone</th>
-                <th style={{ minWidth: 100 }}>Sector</th>
-                <th style={{ minWidth: 120 }}>Location</th>
-                <th style={{ minWidth: 80 }}>Ref</th>
-                <th style={{ minWidth: 120 }}>Status</th>
-                <th style={{ minWidth: 90 }}>Called by</th>
-                <th style={{ minWidth: 200 }}>Last remark</th>
-                <th style={{ minWidth: 110 }}>Follow-up</th>
-                <th style={{ minWidth: 60 }}>Log</th>
+                <th style={{ minWidth: 210, maxWidth: 260 }}>Company</th>
+                <th style={{ minWidth: 160, maxWidth: 180 }}>Contact person</th>
+                <th style={{ minWidth: 120, maxWidth: 140 }}>Designation</th>
+                <th style={{ minWidth: 125 }}>Phone</th>
+                <th style={{ minWidth: 90 }}>Sector</th>
+                <th style={{ minWidth: 90 }}>Location</th>
+                <th style={{ width: 45, textAlign: 'center' }}>Ref</th>
+                <th style={{ minWidth: 110 }}>Status</th>
+                <th style={{ minWidth: 130 }}>Called by</th>
+                <th style={{ minWidth: 180, maxWidth: 260 }}>Last remark</th>
+                <th style={{ minWidth: 85 }}>Follow-up</th>
+                <th style={{ minWidth: 90, textAlign: 'right' }}></th>
               </tr>
             </thead>
             <tbody>
@@ -371,100 +1088,165 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                     onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
                     style={{ cursor: 'pointer' }}
                   >
-                    <td>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{row.company.name}</div>
-                      <div style={{ fontSize: 11, color: '#888' }}>{row.company.list_id.replace(/-/g, ' ')}</div>
+                    {/* Company name — editable */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <EditableCell
+                        value={row.company.name}
+                        onSave={val => handleUpdateCompany(row.company.id, 'name', val)}
+                        style={{ fontWeight: 600, fontSize: 13 }}
+                      />
+                      <div style={{ fontSize: 11, color: '#888', paddingLeft: 6 }}>{row.company.list_id.replace(/-/g, ' ')}</div>
                     </td>
-                    <td>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{row.primaryContact?.name || '—'}</div>
+
+                    {/* Contact person — editable */}
+                    <td onClick={e => e.stopPropagation()}>
+                      {(() => {
+                        const contactName = (row.primaryContact?.name && row.primaryContact.name !== 'Primary Contact')
+                          ? row.primaryContact.name
+                          : ''
+                        const wasCalled = Boolean(row.lastLog?.caller_name || row.company.owner_name)
+                        return (
+                          <EditableCell
+                            value={contactName}
+                            onSave={val => {
+                              if (row.primaryContact) {
+                                handleUpdateContact(row.primaryContact.id, 'name', val)
+                              } else {
+                                handleAddContactInline(row.company.id, 'name', val)
+                              }
+                            }}
+                            style={{ fontWeight: 500, maxWidth: 170 }}
+                            placeholder="+ Add person"
+                          />
+                        )
+                      })()}
                     </td>
-                    <td>
-                      <div style={{ fontSize: 12, color: '#555', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.primaryContact?.designation || '—'}
-                      </div>
+
+                    {/* Designation — editable */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <EditableCell
+                        value={row.primaryContact?.designation || ''}
+                        onSave={val => {
+                          if (row.primaryContact) {
+                            handleUpdateContact(row.primaryContact.id, 'designation', val)
+                          } else {
+                            handleAddContactInline(row.company.id, 'designation', val)
+                          }
+                        }}
+                        style={{ maxWidth: 120 }}
+                        placeholder="—"
+                      />
                     </td>
-                    <td>
+
+                    {/* Phone — editable */}
+                    <td onClick={e => e.stopPropagation()}>
                       {row.primaryContact?.phones?.[0] ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <a
                             href={`tel:${row.primaryContact.phones[0]}`}
                             onClick={e => e.stopPropagation()}
                             style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
                               fontSize: 12, color: '#0B0B0B', textDecoration: 'none', fontWeight: 600,
-                              background: '#F5F5F5', padding: '3px 8px', borderRadius: 6,
                               transition: 'all 0.15s ease',
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = '#E8F5D8'; e.currentTarget.style.color = '#15803D' }}
-                            onMouseLeave={e => { e.currentTarget.style.background = '#F5F5F5'; e.currentTarget.style.color = '#0B0B0B' }}
+                            onMouseEnter={e => { e.currentTarget.style.color = '#15803D' }}
+                            onMouseLeave={e => { e.currentTarget.style.color = '#0B0B0B' }}
                           >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                             </svg>
-                            {row.primaryContact.phones[0]}
                           </a>
+                          <EditableCell
+                            value={row.primaryContact.phones[0]}
+                            onSave={val => handleUpdateContact(row.primaryContact!.id, 'phones', val)}
+                            type="tel"
+                            style={{ fontWeight: 600, fontSize: 12 }}
+                          />
                           <button
-                            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(row.primaryContact!.phones[0]) }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#AAA', fontSize: 12 }}
+                            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(row.primaryContact!.phones[0]); toast.success('Copied!', { duration: 1000 }) }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#AAA', fontSize: 12, flexShrink: 0 }}
                             title="Copy number"
                           >
                             📋
                           </button>
                         </div>
-                      ) : '—'}
+                      ) : (
+                        <EditableCell
+                          value=""
+                          onSave={val => {
+                            if (row.primaryContact) {
+                              handleUpdateContact(row.primaryContact.id, 'phones', val)
+                            } else {
+                              handleAddContactInline(row.company.id, 'phones', val)
+                            }
+                          }}
+                          type="tel"
+                          placeholder="+ Add phone"
+                        />
+                      )}
                     </td>
-                    <td>
-                      <div style={{ fontSize: 12, color: '#555' }}>{row.company.sector || row.company.industry || '—'}</div>
+
+                    {/* Sector — editable */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <EditableCell
+                        value={row.company.sector || row.company.industry || ''}
+                        onSave={val => handleUpdateCompany(row.company.id, 'sector', val)}
+                        placeholder="—"
+                      />
                     </td>
-                    <td>
-                      <div style={{ fontSize: 12, color: '#555', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.company.location || '—'}
-                      </div>
+
+                    {/* Location — editable */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <EditableCell
+                        value={row.company.location || ''}
+                        onSave={val => handleUpdateCompany(row.company.id, 'location', val)}
+                        style={{ maxWidth: 110 }}
+                        placeholder="—"
+                      />
                     </td>
-                    <td>
-                      {row.company.reference 
-                        ? <span className="badge badge-lime">Ref</span>
-                        : <span style={{ color: '#CCC', fontSize: 12 }}>—</span>
-                      }
-                    </td>
-                    <td>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center',
-                        padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                        background: getStatusBg(row.company.status),
-                        color: getStatusTextColor(row.company.status),
-                      }}>
-                        {row.company.status}
+
+                    {/* Ref */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <span
+                        onClick={() => handleUpdateCompany(row.company.id, 'reference', (!row.company.reference) as any)}
+                        style={{ cursor: 'pointer' }}
+                        title="Toggle reference"
+                      >
+                        {row.company.reference 
+                          ? <span className="badge badge-lime">Ref</span>
+                          : <span style={{ color: '#CCC', fontSize: 12 }}>—</span>
+                        }
                       </span>
                     </td>
-                    <td>
-                      {row.lastLog?.caller_name ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {getAvatar(row.lastLog.caller_name) ? (
-                            <img
-                              src={getAvatar(row.lastLog.caller_name)}
-                              alt={row.lastLog.caller_name}
-                              style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', border: '1px solid #E5E5E5' }}
-                            />
-                          ) : (
-                            <div style={{
-                              width: 22, height: 22, borderRadius: '50%',
-                              background: getAvatarColor(row.lastLog.caller_name),
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 9, fontWeight: 700, color: '#0B0B0B',
-                            }}>
-                              {getInitials(row.lastLog.caller_name)}
-                            </div>
-                          )}
-                          <span style={{ fontSize: 12 }}>{row.lastLog.caller_name}</span>
-                        </div>
-                      ) : '—'}
+
+                    {/* Status — dropdown */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <StatusCell
+                        status={row.company.status}
+                        onSave={val => handleUpdateCompany(row.company.id, 'status', val)}
+                      />
                     </td>
-                    <td>
-                      <div style={{ fontSize: 12, color: '#555', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {row.lastLog?.remark || '—'}
-                      </div>
+
+                    {/* Called by */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <CallerCell
+                        caller={row.lastLog?.caller_name || row.company.owner_name}
+                        onSave={val => handleUpdateCaller(row.company.id, val)}
+                      />
                     </td>
+
+                    {/* Last remark — touch editable */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <EditableCell
+                        value={row.lastLog?.remark || ''}
+                        onSave={val => handleUpdateRemark(row.company.id, val)}
+                        placeholder="+ Add remark"
+                        style={{ maxWidth: 220 }}
+                      />
+                    </td>
+
+                    {/* Follow-up date */}
                     <td>
                       {row.lastLog?.follow_up_date ? (
                         <span style={{
@@ -476,40 +1258,79 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                         </span>
                       ) : '—'}
                     </td>
-                    <td>
-                      <button
-                        className="btn btn-sm"
-                        style={{
-                          background: '#0B0B0B',
-                          color: '#FFFFFF',
-                          borderRadius: 8,
-                          padding: '5px 10px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 5,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          border: 'none',
-                          transition: 'all 0.15s ease',
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = '#D9F56B'
-                          e.currentTarget.style.color = '#0B0B0B'
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = '#0B0B0B'
-                          e.currentTarget.style.color = '#FFFFFF'
-                        }}
-                        onClick={e => { e.stopPropagation(); setSelectedRow(row); setDrawerOpen(true) }}
-                        title="Log call (L)"
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                          <path d="M14 2a8 8 0 0 1 8 8" />
-                        </svg>
-                        <span>Log</span>
-                      </button>
+
+                    {/* Actions: Log & Delete */}
+                    <td onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
+                        <button
+                          className="btn btn-sm"
+                          style={{
+                            background: '#0B0B0B',
+                            color: '#FFFFFF',
+                            borderRadius: 8,
+                            padding: '5px 9px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            border: 'none',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.background = '#D9F56B'
+                            e.currentTarget.style.color = '#0B0B0B'
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.background = '#0B0B0B'
+                            e.currentTarget.style.color = '#FFFFFF'
+                          }}
+                          onClick={e => { e.stopPropagation(); setSelectedRow(row); setDrawerOpen(true) }}
+                          title="Log call (L)"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            <path d="M14 2a8 8 0 0 1 8 8" />
+                          </svg>
+                          <span>Log</span>
+                        </button>
+
+                        <button
+                          className="btn btn-sm"
+                          style={{
+                            background: 'transparent',
+                            color: '#9CA3AF',
+                            borderRadius: 8,
+                            padding: '5px 6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            cursor: 'pointer',
+                            border: '1px solid transparent',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.color = '#DC2626'
+                            e.currentTarget.style.background = '#FEE2E2'
+                            e.currentTarget.style.borderColor = '#FECACA'
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.color = '#9CA3AF'
+                            e.currentTarget.style.background = 'transparent'
+                            e.currentTarget.style.borderColor = 'transparent'
+                          }}
+                          onClick={e => {
+                            e.stopPropagation()
+                            setCompanyToDelete(row.company)
+                          }}
+                          title={`Delete ${row.company.name}`}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -527,6 +1348,86 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           onClose={() => setDrawerOpen(false)}
           onSaved={handleLogSaved}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {companyToDelete && (
+        <div
+          className="modal-overlay"
+          onClick={() => !isDeleting && setCompanyToDelete(null)}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999, padding: 16
+          }}
+        >
+          <div
+            className="modal"
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#FFFFFF', borderRadius: 14,
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              maxWidth: 440, width: '100%', padding: '24px 28px',
+              border: '1px solid #E5E7EB', animation: 'scaleUp 0.15s ease'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{
+                width: 38, height: 38, borderRadius: '50%',
+                background: '#FEE2E2', color: '#DC2626',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 18, flexShrink: 0
+              }}>
+                🗑
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>Delete Company</div>
+                <div style={{ fontSize: 12, color: '#6B7280' }}>Permanent deletion from CRM & Excel</div>
+              </div>
+            </div>
+
+            <div style={{
+              fontSize: 13, color: '#374151', lineHeight: 1.5,
+              marginBottom: 20, background: '#F9FAFB', padding: '12px 14px',
+              borderRadius: 8, border: '1px solid #E5E7EB'
+            }}>
+              Are you sure you want to delete <strong style={{ color: '#111827' }}>{companyToDelete.name}</strong>?
+              <div style={{ fontSize: 11, color: '#6B7280', marginTop: 8, lineHeight: 1.6 }}>
+                ✓ Removed from CRM table & workspace<br />
+                ✓ Removed from master Excel workbook (<code>data/CRM.xlsx</code>)<br />
+                ✓ Associated call logs and contacts deleted
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setCompanyToDelete(null)}
+                disabled={isDeleting}
+                style={{ padding: '8px 16px', fontSize: 13, fontWeight: 500 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleDeleteCompany}
+                disabled={isDeleting}
+                style={{
+                  background: '#DC2626', color: '#FFFFFF',
+                  border: 'none', borderRadius: 8, padding: '8px 18px',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  boxShadow: '0 2px 6px rgba(220, 38, 38, 0.25)'
+                }}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Company'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add Company Modal */}
@@ -632,6 +1533,15 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                       is_primary: true,
                     })
                   }
+                  // Sync to live Excel immediately
+                  syncLeadToExcel(newCompany.listId, newCompany.name.trim(), {
+                    companyName: newCompany.name.trim(),
+                    contactName: newCompany.contactName.trim() || undefined,
+                    designation: newCompany.designation || undefined,
+                    phone: newCompany.phone ? newCompany.phone.trim() : undefined,
+                    location: newCompany.location || undefined,
+                    status: 'Not Called',
+                  }).catch(e => console.warn('Excel add sync warning:', e))
                   await new Promise(r => setTimeout(r, 200))
                   setNewCompany({ name: '', contactName: '', phone: '', designation: '', sector: '', location: '', listId: newCompany.listId })
                   setAddingSaving(false)
@@ -646,6 +1556,77 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           </div>
         </div>
       )}
+          {showSharePointModal && (
+        <div className="modal-backdrop" onClick={() => setShowSharePointModal(false)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 560, width: '100%', padding: 24 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 20 }}>📊</span>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>SharePoint Excel Live Sync</span>
+              </div>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowSharePointModal(false)}
+                style={{ fontSize: 18, color: '#888' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ fontSize: 13, color: '#666', lineHeight: 1.5, marginBottom: 16 }}>
+              The CRM continuously synchronizes with this live SharePoint Excel workbook. Any changes made to company remarks, caller assignments, and contact details in SharePoint are pulled on-time.
+            </p>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#444', marginBottom: 6 }}>
+                Active SharePoint URL:
+              </label>
+              <input
+                className="input"
+                style={{ width: '100%', fontSize: 12, fontFamily: 'monospace' }}
+                value={customUrlInput}
+                onChange={e => setCustomUrlInput(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }}>
+              <a
+                href={sharePointUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: 12, textDecoration: 'none', color: '#2563EB', background: 'rgba(37, 99, 235, 0.08)' }}
+              >
+                ↗ Open Excel in SharePoint
+              </a>
+              <span style={{ fontSize: 12, color: '#888' }}>
+                Status: Continuous live auto-sync active (60s)
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setShowSharePointModal(false)}>
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  setSharePointUrl(customUrlInput)
+                  setShowSharePointModal(false)
+                  await handleSyncSharePoint(true)
+                }}
+              >
+                Save & Sync Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
