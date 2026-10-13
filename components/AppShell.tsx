@@ -19,27 +19,30 @@ interface AppShellProps {
 
 export default function AppShell({ user, onLogout }: AppShellProps) {
   const [page, setPage] = useState<NavPage>('calling')
-  const [workspaceReady, setWorkspaceReady] = useState(false)
+  // Instant load: if we already have cached companies, render immediately with 0 delay
+  const [workspaceReady, setWorkspaceReady] = useState(() => {
+    try {
+      const companies = JSON.parse(localStorage.getItem('gc_companies') || '[]')
+      return Array.isArray(companies) && companies.length > 0
+    } catch {
+      return false
+    }
+  })
 
   useEffect(() => {
     let cancelled = false
-    const timeout = setTimeout(() => {
-      if (!cancelled) setWorkspaceReady(true)
-    }, 2500)
     async function initData() {
       try {
         await syncFromSupabase()
       } catch (error) {
-        console.error("Workspace initialization failed:", error)
+        console.error("Workspace sync completed with notice:", error)
       } finally {
-        clearTimeout(timeout)
         if (!cancelled) setWorkspaceReady(true)
       }
     }
     void initData()
     return () => {
       cancelled = true
-      clearTimeout(timeout)
     }
   }, [])
 

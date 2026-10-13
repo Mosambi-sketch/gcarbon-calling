@@ -6,6 +6,7 @@ import type { AppUser } from '@/lib/store'
 export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: AppUser) => void; authError?: string }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState(authError)
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
@@ -201,14 +202,14 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                Company Email
+                Work Email (Gmail or Gcarbon)
               </label>
               <input
                 className="input"
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="name@gcarbon.in"
+                placeholder="your.name@gmail.com"
                 required
                 autoFocus
               />
@@ -230,15 +231,43 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                   </button>
                 )}
               </div>
-              <input
-                className="input"
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter your password'}
-                minLength={mode === 'signup' ? 8 : undefined}
-                required
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="input"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter password'}
+                  minLength={mode === 'signup' ? 8 : undefined}
+                  style={{ paddingRight: 40 }}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  style={{
+                    position: 'absolute',
+                    right: 10,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#64748B',
+                    fontSize: 12,
+                    padding: 4,
+                  }}
+                >
+                  {showPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
+              {mode === 'signin' && (
+                <div style={{ fontSize: 11, color: '#64748B', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>💡</span>
+                  <span>Default team password: <strong style={{ color: '#0F172A', fontWeight: 700 }}>gcarbon123</strong></span>
+                </div>
+              )}
             </div>
 
             {error && (

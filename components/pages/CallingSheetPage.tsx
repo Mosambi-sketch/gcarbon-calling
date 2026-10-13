@@ -624,6 +624,21 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
     return result
   }, [rows, search, filterStatus, filterCaller, filterFollowUp])
 
+  // ── High Performance Pagination (eliminates DOM freeze with 4,000+ companies) ──
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(50)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, filterStatus, filterCaller, filterFollowUp])
+
+  const totalPages = pageSize <= 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize))
+  const paginatedRows = useMemo(() => {
+    if (pageSize <= 0) return filtered
+    const start = (currentPage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, currentPage, pageSize])
+
   const handleNextCompany = () => {
     const today = new Date().toISOString().split('T')[0]
     const next = filtered.find(r => 
@@ -1075,7 +1090,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(row => {
+              {paginatedRows.map(row => {
                 const isOverdue = row.lastLog?.follow_up_date && 
                   new Date(row.lastLog.follow_up_date) < new Date() &&
                   row.lastLog.follow_up_date !== new Date().toISOString().split('T')[0]
@@ -1337,6 +1352,134 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
               })}
             </tbody>
           </table>
+        )}
+
+        {/* ── Modern Fast Pagination Toolbar ── */}
+        {!loading && filtered.length > 0 && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 18px',
+            background: '#FFFFFF',
+            borderTop: '1px solid #E5E7EB',
+            fontSize: 12,
+            color: '#4B5563',
+            flexWrap: 'wrap',
+            gap: 12,
+            position: 'sticky',
+            bottom: 0,
+            zIndex: 10,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span>
+                Showing <strong>{pageSize <= 0 ? 1 : Math.min((currentPage - 1) * pageSize + 1, filtered.length)}</strong> to{' '}
+                <strong>{pageSize <= 0 ? filtered.length : Math.min(currentPage * pageSize, filtered.length)}</strong> of{' '}
+                <strong>{filtered.length.toLocaleString()}</strong> companies
+              </span>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>Per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={e => {
+                    setPageSize(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #D1D5DB',
+                    fontSize: 12,
+                    background: '#FFFFFF',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={-1}>All ({filtered.length})</option>
+                </select>
+              </div>
+            </div>
+
+            {pageSize > 0 && totalPages > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(1)}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #D1D5DB',
+                    background: currentPage === 1 ? '#F3F4F6' : '#FFFFFF',
+                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                    color: currentPage === 1 ? '#9CA3AF' : '#111827',
+                    fontWeight: 600,
+                  }}
+                  title="First page"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #D1D5DB',
+                    background: currentPage === 1 ? '#F3F4F6' : '#FFFFFF',
+                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                    color: currentPage === 1 ? '#9CA3AF' : '#111827',
+                    fontWeight: 600,
+                  }}
+                >
+                  ‹ Prev
+                </button>
+
+                <span style={{ padding: '0 8px', fontWeight: 600, color: '#111827' }}>
+                  Page {currentPage} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #D1D5DB',
+                    background: currentPage === totalPages ? '#F3F4F6' : '#FFFFFF',
+                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                    color: currentPage === totalPages ? '#9CA3AF' : '#111827',
+                    fontWeight: 600,
+                  }}
+                >
+                  Next ›
+                </button>
+                <button
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    border: '1px solid #D1D5DB',
+                    background: currentPage === totalPages ? '#F3F4F6' : '#FFFFFF',
+                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                    color: currentPage === totalPages ? '#9CA3AF' : '#111827',
+                    fontWeight: 600,
+                  }}
+                  title="Last page"
+                >
+                  »
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

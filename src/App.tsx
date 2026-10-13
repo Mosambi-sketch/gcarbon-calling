@@ -4,6 +4,7 @@ import { supabase, isSupabaseReady } from '@/lib/supabase'
 import LoginPage from '@/components/LoginPage'
 import AppShell from '@/components/AppShell'
 import type { AppUser } from '@/lib/store'
+import { DEFAULT_USERS, DEMO_USERS, normalizeEmail } from '@/lib/store'
 import { getAvatar } from '@/lib/types'
 import { Toaster, toast } from 'react-hot-toast'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -28,31 +29,57 @@ export default function App() {
 
     async function handleAuthSession(sessionUser: any) {
       if (!sessionUser) return null
-      const email = (sessionUser.email ?? '').toLowerCase()
+      const email = (sessionUser.email ?? '').toLowerCase().trim()
+      const normEmail = normalizeEmail(email)
+
+      // Match known team member roster
+      const allKnown = [...DEFAULT_USERS, ...DEMO_USERS]
+      const known = allKnown.find(u => {
+        const ue = normalizeEmail(u.email)
+        return ue === normEmail ||
+          ue.replace('@gmail.com', '@gcarbon.in') === normEmail ||
+          ue.replace('@gcarbon.in', '@gmail.com') === normEmail ||
+          ue.split('@')[0] === normEmail.split('@')[0]
+      })
 
       // Check cached user first
       const cached = getCachedUser()
-      if (cached && cached.email.toLowerCase() === email) {
+      if (cached && normalizeEmail(cached.email) === normEmail) {
+        if (known && (!cached.avatar || cached.role !== known.role)) {
+          cached.role = known.role
+          cached.avatar = known.avatar || cached.avatar
+          localStorage.setItem('gc_current_user', JSON.stringify(cached))
+        }
         return cached
       }
 
       // Try fetching profile from Supabase
       try {
-        const { data: profile } = await supabase
+        let profile: any = null
+        const { data: profileById } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', sessionUser.id)
           .maybeSingle()
+        if (profileById) profile = profileById
+        else {
+          const { data: profileByEmail } = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('email', normEmail)
+            .maybeSingle()
+          if (profileByEmail) profile = profileByEmail
+        }
 
         if (profile) {
           const appUser: AppUser = {
             id: sessionUser.id,
             email,
-            name: profile.name,
-            role: (profile.role as 'admin' | 'caller') ?? 'caller',
-            color: profile.color ?? '#E8E8E8',
+            name: profile.name || known?.name || email.split('@')[0],
+            role: (profile.role as 'admin' | 'caller') || known?.role || 'caller',
+            color: profile.color || known?.color || '#E8E8E8',
             password: '',
-            avatar: profile.avatar ?? getAvatar(profile.name) ?? undefined,
+            avatar: profile.avatar || known?.avatar || getAvatar(profile.name) || undefined,
           }
           localStorage.setItem('gc_current_user', JSON.stringify(appUser))
           return appUser
@@ -61,16 +88,17 @@ export default function App() {
         console.warn('Could not load profile from Supabase, creating fallback:', err)
       }
 
-      // Fallback: build app user from metadata
-      const name = sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || email.split('@')[0]
+      // Fallback: build app user from metadata or known roster
+      const name = known?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || email.split('@')[0]
+      const role = known?.role || (email.includes('aadarsh') || email.includes('ajinkya') ? 'admin' : 'caller')
       const fallbackUser: AppUser = {
         id: sessionUser.id,
         email,
         name,
-        role: email.includes('aadarsh') ? 'admin' : 'caller',
-        color: '#A7F3D0',
+        role,
+        color: known?.color || '#A7F3D0',
         password: '',
-        avatar: sessionUser.user_metadata?.avatar_url ?? getAvatar(name) ?? undefined,
+        avatar: known?.avatar || sessionUser.user_metadata?.avatar_url || getAvatar(name) || undefined,
       }
       localStorage.setItem('gc_current_user', JSON.stringify(fallbackUser))
       return fallbackUser
