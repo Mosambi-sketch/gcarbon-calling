@@ -1,7 +1,6 @@
 {
   "functions": {
     "api/index.mjs": {
-      "memory": 1024,
       "maxDuration": 30
     }
   },
