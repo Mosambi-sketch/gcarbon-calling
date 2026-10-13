@@ -1,4 +1,3 @@
-node -e "
 const fs = require('fs');
 const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
@@ -164,4 +163,3 @@ console.log('Lists:', lists.length);
 console.log('Companies:', companies.length);
 console.log('Contacts:', contacts.length);
 console.log('Call logs:', call_logs.length);
-"
