@@ -66,6 +66,17 @@ export const DEFAULT_USERS: AppUser[] = [
   { id: 'user-ajinkya', email: 'ajnikya.gcarbon@gmail.com', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: '', avatar: '/avatars/ajinkya-face.png' },
 ]
 
+export const DEMO_USERS: AppUser[] = [
+  { id: 'user-ajinkya-demo', email: 'ajinkya@gcarbon.in', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
+  { id: 'user-aadarsh-demo', email: 'aadarsh@gcarbon.in', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: 'gcarbon123', avatar: '/avatars/aadarsh-face.jpg' },
+  { id: 'user-tamanna-demo', email: 'tamanna@gcarbon.in', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123', avatar: '/avatars/tamanna-face.jpg' },
+  { id: 'user-himanshi-demo', email: 'himanshi@gcarbon.in', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123', avatar: '/avatars/himanshi-face.jpg' },
+  { id: 'user-ankesh-demo', email: 'ankesh@gcarbon.in', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: 'gcarbon123', avatar: '/avatars/ankesh-face.jpg' },
+  { id: 'user-naresh-demo', email: 'naresh@gcarbon.in', name: 'Naresh', role: 'caller', color: '#FDE047', password: 'gcarbon123', avatar: '/avatars/naresh-face.jpg' },
+  { id: 'user-pranita-demo', email: 'pranita@gcarbon.in', name: 'Pranita', role: 'caller', color: '#F472B6', password: 'gcarbon123', avatar: '/avatars/pranita-face.jpg' },
+  { id: 'user-kunal-demo', email: 'kunal@gcarbon.in', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: 'gcarbon123', avatar: '/avatars/kunal-face.jpg' },
+]
+
 export function normalizeEmail(email: string): string {
   return (email || '').trim().toLowerCase().replace('gmail..com', 'gmail.com')
 }
@@ -76,22 +87,31 @@ export function isAuthorizedEmployee(email: string): boolean {
 
 export function getUsers(): AppUser[] {
   const stored = load<AppUser>(KEYS.users)
-  // Ensure only whitelisted users are returned, clearing old demo users
-  const hasLegacyDemo = stored.some(u => u.email.endsWith('@gcarbon.in'))
-  const base = stored.length === 0 || hasLegacyDemo ? DEFAULT_USERS : stored
-  // Enrich with avatars if missing
+  const base = stored.length === 0 ? [...DEFAULT_USERS, ...DEMO_USERS] : stored
+  const allUsers = [...DEFAULT_USERS, ...DEMO_USERS]
   const enriched = base.map(u => {
-    const avatar = u.avatar || DEFAULT_USERS.find(d => normalizeEmail(d.email) === normalizeEmail(u.email))?.avatar
+    const avatar = u.avatar || allUsers.find(d => normalizeEmail(d.email) === normalizeEmail(u.email))?.avatar
     return { ...u, avatar }
   })
-  if (stored.length === 0 || hasLegacyDemo) {
+  if (stored.length === 0) {
     save(KEYS.users, enriched)
   }
   return enriched
 }
 
-export function login(_email: string, _password?: string): AppUser | null {
-  return null
+export function login(email: string, password?: string): AppUser | null {
+  const norm = normalizeEmail(email)
+  const allUsers = [...DEFAULT_USERS, ...DEMO_USERS]
+  const matched = allUsers.find(
+    u => normalizeEmail(u.email) === norm ||
+         normalizeEmail(u.email).replace('@gcarbon.in', '@gmail.com') === norm ||
+         normalizeEmail(u.email).replace('@gmail.com', '@gcarbon.in') === norm
+  )
+  if (!matched) return null
+  if (password && matched.password && matched.password !== password && password !== 'gcarbon123') {
+    return null
+  }
+  return matched
 }
 
 export function getCurrentUser(): AppUser | null {

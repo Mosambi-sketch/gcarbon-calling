@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { sendPasswordReset, signIn, signInWithGoogle, signUpWithCompanyEmail } from '@/lib/db'
 import { isSupabaseReady } from '@/lib/supabase'
 import type { AppUser } from '@/lib/store'
-import { DEFAULT_USERS } from '@/lib/store'
+import { DEFAULT_USERS, DEMO_USERS } from '@/lib/store'
 
 export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: AppUser) => void; authError?: string }) {
   const [email, setEmail] = useState('')
@@ -11,6 +11,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [accountTab, setAccountTab] = useState<'demo' | 'team'>('demo')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -230,24 +231,68 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
           )}
 
           <div style={{ marginTop: 22, padding: '14px 16px', background: '#F8FAFC', borderRadius: 14, border: '1px solid #E2E8F0' }}>
-            <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>⚡ ONE-CLICK TEAM ACCESS</span>
-              <span style={{ color: '#16A34A', fontWeight: 600, fontSize: 10 }}>● Authorized Team</span>
+            {/* Tab switch */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12, padding: 3, background: '#E2E8F0', borderRadius: 10 }}>
+              <button
+                type="button"
+                onClick={() => setAccountTab('demo')}
+                style={{
+                  padding: '6px 8px', border: 0, borderRadius: 7,
+                  background: accountTab === 'demo' ? '#FFFFFF' : 'transparent',
+                  boxShadow: accountTab === 'demo' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  fontSize: 12, fontWeight: 700,
+                  color: accountTab === 'demo' ? '#0F172A' : '#64748B',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <span>🎭 Demo Accounts</span>
+                <span style={{ fontSize: 9, background: '#FEF3C7', color: '#92400E', padding: '1px 5px', borderRadius: 10 }}>gcarbon123</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAccountTab('team')}
+                style={{
+                  padding: '6px 8px', border: 0, borderRadius: 7,
+                  background: accountTab === 'team' ? '#FFFFFF' : 'transparent',
+                  boxShadow: accountTab === 'team' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  fontSize: 12, fontWeight: 700,
+                  color: accountTab === 'team' ? '#0F172A' : '#64748B',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <span>⚡ Team Members</span>
+              </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
-              {DEFAULT_USERS.map(u => (
+            <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>
+                {accountTab === 'demo' ? 'SELECT DEMO ACCOUNT (Instant Access)' : 'AUTHORIZED TEAM ACCOUNTS'}
+              </span>
+              <span style={{ color: accountTab === 'demo' ? '#D97706' : '#16A34A', fontWeight: 600, fontSize: 10 }}>
+                {accountTab === 'demo' ? '● Password: gcarbon123' : '● Live Sync'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 250, overflowY: 'auto' }}>
+              {(accountTab === 'demo' ? DEMO_USERS : DEFAULT_USERS).map(u => (
                 <button
                   key={u.email}
                   type="button"
                   onClick={() => {
+                    // Pre-fill fields
+                    setEmail(u.email)
+                    setPassword(accountTab === 'demo' ? 'gcarbon123' : '')
+                    
+                    // Instant 1-click login
                     const appUser: AppUser = {
                       id: u.id,
                       email: u.email,
                       name: u.name,
                       role: u.role,
                       color: u.color,
-                      password: '',
+                      password: u.password || 'gcarbon123',
                       avatar: u.avatar,
                     }
                     localStorage.setItem('gc_current_user', JSON.stringify(appUser))
@@ -261,8 +306,8 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                     transition: 'all 0.15s ease',
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.background = '#F0FDF4'
-                    e.currentTarget.style.borderColor = '#86EFAC'
+                    e.currentTarget.style.background = accountTab === 'demo' ? '#FFFBEB' : '#F0FDF4'
+                    e.currentTarget.style.borderColor = accountTab === 'demo' ? '#FCD34D' : '#86EFAC'
                   }}
                   onMouseLeave={e => {
                     e.currentTarget.style.background = '#FFFFFF'
@@ -272,7 +317,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                   <img
                     src={u.avatar}
                     alt={u.name}
-                    style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover' }}
+                    style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }}
                   />
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <span style={{ fontWeight: 700, fontSize: 12 }}>
@@ -280,8 +325,8 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                     </span>
                     <span style={{ color: '#64748B', fontSize: 11 }}>{u.email}</span>
                   </div>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: '#059669', fontWeight: 600 }}>
-                    Enter →
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: accountTab === 'demo' ? '#B45309' : '#059669', fontWeight: 700 }}>
+                    Enter Demo →
                   </span>
                 </button>
               ))}
