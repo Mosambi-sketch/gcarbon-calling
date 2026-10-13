@@ -13,6 +13,7 @@ import { format, addDays, isToday, isPast } from 'date-fns'
 import LogCallDrawer from '../LogCallDrawer'
 import toast from 'react-hot-toast'
 import { syncFromSupabase } from '@/lib/db'
+import { Phone, MessageSquare, LayoutGrid, Table as TableIcon } from 'lucide-react'
 
 interface Row {
   company: Company
@@ -435,6 +436,31 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
   const [users, setUsers] = useState(getUsers())
   const [loading, setLoading] = useState(true)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Mobile-first View mode toggle (Cards for mobile, Table for desktop)
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+    try {
+      const saved = localStorage.getItem('gc_calling_view_mode')
+      if (saved === 'cards' || saved === 'table') return saved
+      return typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table'
+    } catch {
+      return 'table'
+    }
+  })
+
+  const handleToggleViewMode = (mode: 'cards' | 'table') => {
+    setViewMode(mode)
+    try {
+      localStorage.setItem('gc_calling_view_mode', mode)
+    } catch {}
+  }
+
+  const handleOpenWhatsApp = (phone: string, companyName: string) => {
+    const cleanPhone = phone.replace(/[^0-9]/g, '')
+    const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone
+    const text = encodeURIComponent(`Hello, connecting regarding ${companyName} from Gcarbon.`)
+    window.open(`https://wa.me/${fullPhone}?text=${text}`, '_blank', 'noopener,noreferrer')
+  }
 
   // Add Company modal state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -1050,12 +1076,66 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           </button>
         )}
 
-        <div style={{ marginLeft: 'auto', fontSize: 11, color: '#AAA', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span title="Touch or click any cell to edit directly" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#F0FFF0', color: '#16A34A', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* View Mode Toggle */}
+          <div style={{
+            display: 'inline-flex',
+            background: 'var(--surface-2, #F3F4F6)',
+            padding: 2,
+            borderRadius: 8,
+            border: '1px solid var(--border, #E5E7EB)'
+          }}>
+            <button
+              type="button"
+              onClick={() => handleToggleViewMode('cards')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 9px',
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                background: viewMode === 'cards' ? '#0B0B0B' : 'transparent',
+                color: viewMode === 'cards' ? '#FFFFFF' : '#6B7280',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              title="Mobile Cards View (Optimized for Phone Calling)"
+            >
+              <LayoutGrid size={13} />
+              <span>Cards</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleViewMode('table')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 9px',
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: 600,
+                background: viewMode === 'table' ? '#0B0B0B' : 'transparent',
+                color: viewMode === 'table' ? '#FFFFFF' : '#6B7280',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              title="Spreadsheet Table View"
+            >
+              <TableIcon size={13} />
+              <span>Table</span>
+            </button>
+          </div>
+
+          <span title="Touch or click any cell to edit directly" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#F0FFF0', color: '#16A34A', padding: '2px 8px', borderRadius: 6, fontWeight: 600, fontSize: 11 }}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Editable
           </span>
-          <span>
+          <span style={{ fontSize: 11, color: '#AAA', whiteSpace: 'nowrap' }}>
             Press <kbd style={{ background: '#F0F0F0', padding: '1px 5px', borderRadius: 4, fontSize: 10 }}>/</kbd> to search
           </span>
         </div>
@@ -1070,6 +1150,237 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
             <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
             <div style={{ fontWeight: 600 }}>No companies found</div>
             <div style={{ fontSize: 13, color: '#888' }}>Try adjusting your filters</div>
+          </div>
+        ) : viewMode === 'cards' ? (
+          <div className="mobile-calling-cards-container">
+            {paginatedRows.map(row => {
+              const isOverdue = row.lastLog?.follow_up_date && 
+                new Date(row.lastLog.follow_up_date) < new Date() &&
+                row.lastLog.follow_up_date !== new Date().toISOString().split('T')[0]
+              const isDueToday = row.lastLog?.follow_up_date === new Date().toISOString().split('T')[0]
+              const phone = row.primaryContact?.phones?.[0] || ''
+
+              return (
+                <div
+                  key={row.company.id}
+                  className={`mobile-calling-card ${isOverdue ? 'overdue-card' : isDueToday ? 'followup-today-card' : row.company.status === 'Meeting Set' ? 'meeting-set-card' : ''}`}
+                >
+                  {/* Top: Company Name + List & Sector Badges + Status */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 16,
+                          color: 'var(--text, #111827)',
+                          cursor: 'pointer',
+                          lineHeight: 1.3,
+                          marginBottom: 4,
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {row.company.name}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: '#6B7280', background: 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 6, fontWeight: 500 }}>
+                          {row.company.list_id.replace(/-/g, ' ')}
+                        </span>
+                        {row.company.sector && (
+                          <span style={{ fontSize: 11, color: '#4B5563', background: 'var(--surface-2, #F3F4F6)', padding: '2px 8px', borderRadius: 6 }}>
+                            {row.company.sector}
+                          </span>
+                        )}
+                        {row.company.location && (
+                          <span style={{ fontSize: 11, color: '#4B5563', background: 'var(--surface-2, #F3F4F6)', padding: '2px 8px', borderRadius: 6 }}>
+                            📍 {row.company.location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Status with quick change dropdown */}
+                    <div onClick={e => e.stopPropagation()}>
+                      <StatusCell
+                        status={row.company.status}
+                        onSave={val => handleUpdateCompany(row.company.id, 'status', val)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Contact person + designation */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    background: 'var(--surface-2, #F9FAFB)',
+                    borderRadius: 10,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%',
+                        background: getAvatarColor(row.primaryContact?.name || 'Contact'),
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700, flexShrink: 0
+                      }}>
+                        {getInitials(row.primaryContact?.name || 'C')}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text, #111827)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {row.primaryContact?.name && row.primaryContact.name !== 'Primary Contact' ? row.primaryContact.name : 'No Contact Person'}
+                        </div>
+                        {row.primaryContact?.designation && (
+                          <div style={{ fontSize: 11, color: '#6B7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {row.primaryContact.designation}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {row.company.website && (
+                      <a
+                        href={row.company.website.startsWith('http') ? row.company.website : `https://${row.company.website}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 11, color: '#2563EB', textDecoration: 'none', fontWeight: 600 }}
+                      >
+                        Web ↗
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Primary Calling Bar: High Touch Targets */}
+                  {phone ? (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                      <a
+                        href={`tel:${phone}`}
+                        onClick={() => {
+                          setSelectedRow(row)
+                          setDrawerOpen(true)
+                        }}
+                        className="mobile-call-btn"
+                        style={{ flex: 2 }}
+                        title="1-Tap Call: Initiates phone dialer and opens Log Call notes"
+                      >
+                        <Phone size={16} />
+                        <span>Call {phone}</span>
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenWhatsApp(phone, row.company.name)}
+                        className="mobile-whatsapp-btn"
+                        style={{ flex: 1 }}
+                        title="Open WhatsApp chat"
+                      >
+                        <MessageSquare size={15} />
+                        <span>WhatsApp</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '10px 14px',
+                      background: 'rgba(245, 158, 11, 0.1)',
+                      color: '#B45309',
+                      borderRadius: 10,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}>
+                      <span>⚠️ No phone number saved for this lead</span>
+                    </div>
+                  )}
+
+                  {/* Activity: Caller & Follow-up date */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 12,
+                    borderTop: '1px solid var(--border, #F3F4F6)',
+                    paddingTop: 10
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: '#6B7280', fontSize: 11 }}>Caller:</span>
+                      <CallerCell
+                        caller={row.lastLog?.caller_name || row.company.owner_name}
+                        onSave={val => handleUpdateCaller(row.company.id, val)}
+                      />
+                    </div>
+
+                    {row.lastLog?.follow_up_date ? (
+                      <span style={{
+                        fontSize: 11, fontWeight: 700,
+                        color: isOverdue ? '#DC2626' : isDueToday ? '#D97706' : '#4B5563',
+                        background: isOverdue ? 'rgba(220, 38, 38, 0.1)' : isDueToday ? 'rgba(217, 119, 6, 0.1)' : 'var(--surface-2, #F3F4F6)',
+                        padding: '3px 8px', borderRadius: 6,
+                      }}>
+                        {isOverdue ? '⚠ Overdue: ' : isDueToday ? '📅 Today: ' : '📅 '}
+                        {format(new Date(row.lastLog.follow_up_date + 'T00:00:00'), 'dd MMM')}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#9CA3AF' }}>No follow-up set</span>
+                    )}
+                  </div>
+
+                  {/* Last remark */}
+                  {row.lastLog?.remark && (
+                    <div style={{
+                      fontSize: 12,
+                      color: 'var(--text, #4B5563)',
+                      background: 'var(--surface-2, #F8FAFC)',
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      fontStyle: 'italic',
+                      lineHeight: 1.4
+                    }}>
+                      "{row.lastLog.remark}"
+                    </div>
+                  )}
+
+                  {/* Card bottom actions */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', paddingTop: 4 }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
+                      style={{
+                        background: '#0B0B0B',
+                        color: '#FFFFFF',
+                        borderRadius: 8,
+                        padding: '8px 14px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        minHeight: 38,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span>Open & Log Notes</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompanyToDelete(row.company)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#9CA3AF',
+                        padding: '8px 10px',
+                        cursor: 'pointer',
+                        borderRadius: 6,
+                        fontSize: 14
+                      }}
+                      title="Delete lead"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         ) : (
           <table className="data-table" style={{ minWidth: 1200, width: '100%' }}>
@@ -1159,16 +1470,21 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <a
                             href={`tel:${row.primaryContact.phones[0]}`}
-                            onClick={e => e.stopPropagation()}
+                            onClick={e => {
+                              e.stopPropagation()
+                              setSelectedRow(row)
+                              setDrawerOpen(true)
+                            }}
                             style={{
                               display: 'inline-flex', alignItems: 'center', gap: 4,
-                              fontSize: 12, color: '#0B0B0B', textDecoration: 'none', fontWeight: 600,
+                              fontSize: 12, color: 'var(--text, #111827)', textDecoration: 'none', fontWeight: 600,
                               transition: 'all 0.15s ease',
                             }}
                             onMouseEnter={e => { e.currentTarget.style.color = '#15803D' }}
-                            onMouseLeave={e => { e.currentTarget.style.color = '#0B0B0B' }}
+                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text, #111827)' }}
+                            title="Call number & open log notes"
                           >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
                               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                             </svg>
                           </a>
@@ -1482,6 +1798,67 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           </div>
         )}
       </div>
+
+      {/* Mobile Sticky Quick-Action Bar */}
+      {viewMode === 'cards' && filtered.length > 0 && (
+        <div className="mobile-calling-bottom-bar">
+          <button
+            type="button"
+            onClick={handleNextCompany}
+            className="mobile-call-btn"
+            style={{
+              padding: '10px 16px',
+              fontSize: 13,
+              borderRadius: 10,
+              minHeight: 44,
+              boxShadow: '0 2px 10px rgba(22, 163, 74, 0.3)',
+            }}
+          >
+            <Phone size={15} />
+            <span>Next to Call (N)</span>
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600 }}>
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border, #D1D5DB)',
+                background: currentPage === 1 ? 'rgba(0,0,0,0.05)' : 'var(--surface, #FFFFFF)',
+                color: currentPage === 1 ? '#9CA3AF' : 'var(--text, #111827)',
+                fontWeight: 600,
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                minHeight: 40,
+              }}
+            >
+              ‹
+            </button>
+            <span style={{ color: 'var(--text, #111827)', padding: '0 4px', whiteSpace: 'nowrap' }}>
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: '1px solid var(--border, #D1D5DB)',
+                background: currentPage === totalPages ? 'rgba(0,0,0,0.05)' : 'var(--surface, #FFFFFF)',
+                color: currentPage === totalPages ? '#9CA3AF' : 'var(--text, #111827)',
+                fontWeight: 600,
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                minHeight: 40,
+              }}
+            >
+              ›
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Log Call Drawer */}
       {drawerOpen && selectedRow && (

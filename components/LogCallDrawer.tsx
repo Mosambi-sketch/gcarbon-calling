@@ -314,7 +314,7 @@ export default function LogCallDrawer({
       {/* Drawer */}
       <div 
         className="drawer animate-slide-in-right" 
-        style={{ width: 560, display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--card)' }}
+        style={{ width: 'min(560px, 100vw)', maxWidth: '100vw', display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--card)' }}
       >
         {/* Presence Warning */}
         {presenceWarning && (
@@ -441,7 +441,7 @@ export default function LogCallDrawer({
                 <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{primaryContact.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{primaryContact.designation || 'Primary Contact'}</div>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {primaryContact.phones.map((ph, i) => (
                   <a 
                     key={i} 

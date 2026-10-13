@@ -1839,3 +1839,158 @@ select.status-dead         { background: #FEE2E2; color: #DC2626; border: 0; bor
 [data-theme="dark"] select.status-meeting      { background: rgba(217,245,107,0.15); color: #D9F56B; }
 [data-theme="dark"] select.status-interested   { background: rgba(34,197,94,0.12); color: #4ADE80; }
 [data-theme="dark"] select.status-dead         { background: rgba(239,68,68,0.12); color: #F87171; }
+
+/* ── Mobile-First Calling Cards & Controls ───────────────────────────────── */
+.mobile-calling-cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  padding: 14px 16px 85px 16px;
+}
+
+@media (max-width: 640px) {
+  .mobile-calling-cards-container {
+    grid-template-columns: 1fr;
+    padding: 10px 10px 95px 10px;
+    gap: 12px;
+  }
+}
+
+.mobile-calling-card {
+  background: var(--surface, #FFFFFF);
+  border: 1px solid var(--border, #E5E7EB);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: relative;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.mobile-calling-card:hover {
+  border-color: #D9F56B;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.07);
+}
+
+.mobile-calling-card:active {
+  transform: scale(0.995);
+}
+
+.mobile-calling-card.overdue-card {
+  border-left: 4px solid #DC2626;
+}
+
+.mobile-calling-card.followup-today-card {
+  border-left: 4px solid #D97706;
+}
+
+.mobile-calling-card.meeting-set-card {
+  border-left: 4px solid #D9F56B;
+}
+
+[data-theme="dark"] .mobile-calling-card {
+  background: #18181B;
+  border-color: #27272A;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}
+
+[data-theme="dark"] .mobile-calling-card:hover {
+  border-color: rgba(217, 245, 107, 0.4);
+}
+
+[data-theme="dark"] .mobile-calling-card.overdue-card {
+  border-left: 4px solid #EF4444;
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.05) 0%, #18181B 30%);
+}
+
+[data-theme="dark"] .mobile-calling-card.followup-today-card {
+  border-left: 4px solid #F59E0B;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.05) 0%, #18181B 30%);
+}
+
+.mobile-call-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #16A34A, #15803D);
+  color: #FFFFFF !important;
+  text-decoration: none !important;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 13px;
+  min-height: 46px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.25);
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  border: none;
+}
+
+.mobile-call-btn:hover {
+  background: linear-gradient(135deg, #15803D, #166534);
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.35);
+}
+
+.mobile-call-btn:active {
+  transform: scale(0.97);
+}
+
+.mobile-whatsapp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #25D366;
+  color: #FFFFFF !important;
+  text-decoration: none !important;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 12px;
+  min-height: 46px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.2);
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  border: none;
+}
+
+.mobile-whatsapp-btn:hover {
+  background: #1EBE5D;
+}
+
+.mobile-whatsapp-btn:active {
+  transform: scale(0.97);
+}
+
+/* Floating / Sticky Mobile Bottom Action Bar */
+.mobile-calling-bottom-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border, #E5E7EB);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  z-index: 100;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.06);
+}
+
+[data-theme="dark"] .mobile-calling-bottom-bar {
+  background: rgba(18, 18, 20, 0.95);
+  border-top-color: #27272A;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+}
+
