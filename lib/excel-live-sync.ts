@@ -2,6 +2,11 @@
  * lib/excel-live-sync.ts — Real-time live synchronization of CRM changes to master Excel
  */
 
+import { toast } from 'react-hot-toast'
+import { getCachedUser } from './db'
+import { supabase } from './supabase'
+import { getCompanies, getContacts, getCallLogs, getLists } from './store'
+
 export interface LeadExcelUpdates {
   companyName?: string
   contactName?: string
@@ -16,6 +21,25 @@ export interface LeadExcelUpdates {
   status?: string
 }
 
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  const user = getCachedUser()
+  if (user?.email) {
+    headers['x-user-email'] = user.email
+  }
+  try {
+    const { data } = await supabase.auth.getSession()
+    if (data?.session?.access_token) {
+      headers['Authorization'] = `Bearer ${data.session.access_token}`
+    }
+  } catch {
+    // quiet ignore
+  }
+  return headers
+}
+
 export async function syncLeadToExcel(
   listId: string,
   companyName: string,
@@ -23,9 +47,10 @@ export async function syncLeadToExcel(
 ): Promise<boolean> {
   if (!companyName) return false
   try {
+    const headers = await getAuthHeaders()
     const res = await fetch('/api/excel/sync-lead', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         listId,
         companyName,
@@ -40,13 +65,106 @@ export async function syncLeadToExcel(
   }
 }
 
-export function downloadLiveExcelFile() {
-  const link = document.createElement('a')
-  link.href = '/api/excel/download'
-  link.download = 'CRM_Live.xlsx'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+export async function downloadLiveExcelFile(): Promise<void> {
+  const toastId = toast.loading('Preparing live Excel workbook...')
+  try {
+    const headers = await getAuthHeaders()
+    const res = await fetch('/api/excel/download', { headers })
+
+    if (res.ok) {
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Gcarbon_CRM_Live_${new Date().toISOString().slice(0, 10)}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.success('Live Excel downloaded on-time!', { id: toastId })
+      return
+    }
+    throw new Error(`Download status: ${res.status}`)
+  } catch (err) {
+    console.warn('[Excel Download] Server download failed, falling back to instant client-side export:', err)
+    try {
+      const XLSX = await import('xlsx')
+      const companies = getCompanies()
+      const contacts = getContacts()
+      const callLogs = getCallLogs()
+      const workspaces = getLists()
+
+      const contactsByCompany = new Map<string, typeof contacts>()
+      for (const c of contacts) {
+        if (!contactsByCompany.has(c.company_id)) contactsByCompany.set(c.company_id, [])
+        contactsByCompany.get(c.company_id)!.push(c)
+      }
+
+      const logsByCompany = new Map<string, typeof callLogs>()
+      for (const l of callLogs) {
+        if (!logsByCompany.has(l.company_id)) logsByCompany.set(l.company_id, [])
+        logsByCompany.get(l.company_id)!.push(l)
+      }
+
+      const wb = XLSX.utils.book_new()
+      const headers = [
+        'Company Name',
+        'Contact Person',
+        'Designation',
+        'Phone',
+        'Email',
+        'Location',
+        'Reference?',
+        'Called By',
+        'Remark 1',
+        'Remark 2',
+        'Follow-up Date',
+        'Stage',
+        'Next Action',
+      ]
+
+      const activeSheets = workspaces.length > 0 ? workspaces : [{ id: 'all', name: 'All Companies' }]
+
+      for (const ws of activeSheets) {
+        const wsComps = ws.id === 'all'
+          ? companies
+          : companies.filter(c => (c.workspace_id && c.workspace_id === ws.id) || c.list_id === ws.id)
+
+        const rows = wsComps.map(c => {
+          const compContacts = contactsByCompany.get(c.id) || []
+          const primary = compContacts.find(p => p.is_primary) || compContacts[0]
+          const compLogs = logsByCompany.get(c.id) || []
+          const phoneStr = (primary?.phones || []).join(', ')
+
+          return [
+            c.name || '',
+            primary?.name || '',
+            primary?.designation || '',
+            phoneStr,
+            primary?.email || '',
+            c.location || '',
+            c.reference ? 'Reference' : 'No reference',
+            c.owner_name || '',
+            compLogs[0]?.remark || c.notes || '',
+            compLogs[1]?.remark || '',
+            compLogs[0]?.follow_up_date || '',
+            c.status || 'Not Started',
+            compLogs[0]?.next_action || '',
+          ]
+        })
+
+        const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
+        const safeTitle = (ws.name || 'Sheet').slice(0, 31).replace(/[\\/?*[\\]]/g, '')
+        XLSX.utils.book_append_sheet(wb, sheet, safeTitle)
+      }
+
+      XLSX.writeFile(wb, `Gcarbon_CRM_Live_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      toast.success('Live Excel downloaded successfully!', { id: toastId })
+    } catch (fallbackErr) {
+      console.error('[Excel Download Failed completely]:', fallbackErr)
+      toast.error('Failed to generate Excel file.', { id: toastId })
+    }
+  }
 }
 
 export async function deleteLeadFromExcel(
@@ -55,9 +173,10 @@ export async function deleteLeadFromExcel(
 ): Promise<boolean> {
   if (!companyName) return false
   try {
+    const headers = await getAuthHeaders()
     const res = await fetch('/api/excel/delete-lead', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         listId,
         companyName,

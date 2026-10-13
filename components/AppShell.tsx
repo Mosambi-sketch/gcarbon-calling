@@ -31,6 +31,10 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
 
   useEffect(() => {
     let cancelled = false
+    const safety = setTimeout(() => {
+      if (!cancelled) setWorkspaceReady(true)
+    }, 1200)
+
     async function initData() {
       try {
         await syncFromSupabase()
@@ -38,11 +42,13 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
         console.error("Workspace sync completed with notice:", error)
       } finally {
         if (!cancelled) setWorkspaceReady(true)
+        clearTimeout(safety)
       }
     }
     void initData()
     return () => {
       cancelled = true
+      clearTimeout(safety)
     }
   }, [])
 
@@ -109,8 +115,37 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
 
   if (!workspaceReady) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#EFEFEF' }}>
-        <div className="spinner" style={{ width: 32, height: 32 }} />
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        background: '#09090B',
+        color: '#FFFFFF',
+        fontFamily: 'Plus Jakarta Sans, sans-serif',
+        gap: 16,
+      }}>
+        <div style={{
+          width: 52,
+          height: 52,
+          borderRadius: 14,
+          background: '#18181B',
+          border: '1px solid #27272A',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#D9F56B',
+          fontWeight: 800,
+          fontSize: 20,
+          boxShadow: '0 8px 24px rgba(217, 245, 107, 0.15)',
+        }}>
+          GC
+        </div>
+        <div className="spinner" style={{ width: 28, height: 28, borderTopColor: '#D9F56B' }} />
+        <div style={{ fontSize: 13, color: '#A1A1AA', fontWeight: 500 }}>
+          Synchronizing Calling Workspace...
+        </div>
       </div>
     )
   }

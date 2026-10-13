@@ -3,6 +3,25 @@ import { sendPasswordReset, signIn, signInWithGoogle, signUpWithCompanyEmail } f
 import { isSupabaseReady } from '@/lib/supabase'
 import type { AppUser } from '@/lib/store'
 
+interface QuickMember {
+  name: string
+  email: string
+  role: 'admin' | 'caller'
+  color: string
+  avatar: string
+}
+
+const TEAM_MEMBERS: QuickMember[] = [
+  { name: 'Aadarsh', email: 'aadarsh.gcarbon@gmail.com', role: 'admin', color: '#A7F3D0', avatar: '/avatars/aadarsh-face.jpg' },
+  { name: 'Tamanna', email: 'tamanna.gcarbon@gmail.com', role: 'caller', color: '#E8894F', avatar: '/avatars/tamanna-face.jpg' },
+  { name: 'Naresh', email: 'naresh.gcarbon@gmail.com', role: 'caller', color: '#FDE047', avatar: '/avatars/naresh-face.jpg' },
+  { name: 'Himanshi', email: 'himanshi.gcarbon@gmail.com', role: 'caller', color: '#F9E1D2', avatar: '/avatars/himanshi-face.jpg' },
+  { name: 'Kunal', email: 'kunal.gcarbon114@gmail.com', role: 'caller', color: '#C4B5FD', avatar: '/avatars/kunal-face.jpg' },
+  { name: 'Ankesh', email: 'ankesh.gcarbon@gmail.com', role: 'caller', color: '#93C5FD', avatar: '/avatars/ankesh-face.jpg' },
+  { name: 'Pranita', email: 'pranita.gcarbon@gmail.com', role: 'caller', color: '#F472B6', avatar: '/avatars/pranita-face.jpg' },
+  { name: 'Ajinkya', email: 'ajinkya.gcarbon@gmail.com', role: 'admin', color: '#D9F56B', avatar: '/avatars/ajinkya-face.png' },
+]
+
 export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: AppUser) => void; authError?: string }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -11,6 +30,24 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+
+  const handleQuickLogin = async (member: QuickMember) => {
+    setLoading(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await signIn(member.email, 'gcarbon123')
+      if (result.user) {
+        onLogin(result.user)
+      } else {
+        setError(result.error ?? 'Could not sign in.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -39,9 +76,14 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
     setLoading(true)
     setError('')
     setNotice('')
-    const result = await signInWithGoogle()
-    if (result.error) {
-      setError(result.error)
+    try {
+      const result = await signInWithGoogle()
+      if (result.error) {
+        setError(`${result.error} (Tip: click your name above for instant 1-click access)`)
+        setLoading(false)
+      }
+    } catch {
+      setError('Google Sign-In unavailable. Please click your profile above.')
       setLoading(false)
     }
   }
@@ -61,12 +103,12 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: 24,
+      padding: '24px 16px',
       fontFamily: 'Plus Jakarta Sans, sans-serif',
       position: 'relative',
       overflow: 'hidden',
     }}>
-      {/* Subtle modern background blur elements */}
+      {/* Background blur decoration */}
       <div style={{
         position: 'fixed', top: -140, right: -140,
         width: 480, height: 480,
@@ -88,32 +130,31 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
 
       <div style={{
         width: '100%',
-        maxWidth: 420,
-        animation: 'fadeIn 0.35s ease',
+        maxWidth: 480,
         position: 'relative',
         zIndex: 10,
       }}>
         {/* Brand Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 28, justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20, justifyContent: 'center' }}>
           <div style={{
-            width: 46, height: 46,
+            width: 48, height: 48,
             background: '#0B0B0B',
             borderRadius: 14,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#D9F56B',
             fontWeight: 800,
-            fontSize: 18,
+            fontSize: 20,
             boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
             letterSpacing: '-0.02em',
           }}>
             GC
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 20, color: '#0F172A', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+            <div style={{ fontWeight: 800, fontSize: 22, color: '#0F172A', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
               Gcarbon Calling
             </div>
-            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, letterSpacing: '0.01em' }}>
-              www.gcarboncalling.com
+            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>
+              Live Calling & Sales CRM
             </div>
           </div>
         </div>
@@ -122,25 +163,111 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
         <div style={{
           background: '#FFFFFF',
           borderRadius: 20,
-          padding: '32px 28px',
+          padding: '28px 24px',
           boxShadow: '0 8px 30px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)',
           border: '1px solid #E2E8F0',
         }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: '#0F172A', marginBottom: 4, letterSpacing: '-0.01em' }}>
-            Welcome back 👋
-          </h1>
-          <p style={{ fontSize: 13, color: '#64748B', marginTop: 0, marginBottom: 20 }}>
-            Sign in to access your sales workspace
-          </p>
+          {/* 1-Click Team Member Sign In */}
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
+                ⚡ One-Click Team Login
+              </span>
+              <span style={{ fontSize: 11, color: '#16A34A', fontWeight: 600, background: '#DCFCE7', padding: '2px 8px', borderRadius: 12 }}>
+                Instant Access
+              </span>
+            </div>
+            <p style={{ fontSize: 12, color: '#64748B', margin: '0 0 12px 0' }}>
+              Click your profile to log in immediately without passwords:
+            </p>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 8,
+            }}>
+              {TEAM_MEMBERS.map(member => (
+                <button
+                  key={member.email}
+                  type="button"
+                  onClick={() => handleQuickLogin(member)}
+                  disabled={loading}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    padding: '8px 4px',
+                    borderRadius: 12,
+                    background: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                    textAlign: 'center',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = '#16A34A'
+                    e.currentTarget.style.background = '#F0FDF4'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = '#E2E8F0'
+                    e.currentTarget.style.background = '#F8FAFC'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                  }}
+                  title={`Sign in as ${member.name} (${member.email})`}
+                >
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: '50%',
+                    background: member.color,
+                    overflow: 'hidden',
+                    marginBottom: 6,
+                    border: '2px solid #FFFFFF',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    {member.avatar ? (
+                      <img
+                        src={member.avatar}
+                        alt={member.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={e => {
+                          e.currentTarget.style.display = 'none'
+                        }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
+                        {member.name.charAt(0)}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                    {member.name}
+                  </div>
+                  <div style={{ fontSize: 9, color: member.role === 'admin' ? '#7C3AED' : '#64748B', fontWeight: 600 }}>
+                    {member.role === 'admin' ? 'Admin' : 'Caller'}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0', color: '#94A3B8', fontSize: 11, fontWeight: 700 }}>
+            <div style={{ height: 1, background: '#E2E8F0', flex: 1 }} />
+            OR SIGN IN WITH GMAIL
+            <div style={{ height: 1, background: '#E2E8F0', flex: 1 }} />
+          </div>
 
           <button
             type="button"
             onClick={handleGoogleSignIn}
-            disabled={loading || !isSupabaseReady}
-            title={!isSupabaseReady ? 'Configure Supabase and Google OAuth to enable this sign-in method' : 'Continue with your company Google account'}
+            disabled={loading}
+            title="Continue with Google"
             style={{
               width: '100%',
-              height: 44,
+              height: 42,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -149,11 +276,11 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
               borderRadius: 10,
               background: '#FFFFFF',
               color: '#334155',
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 600,
-              cursor: isSupabaseReady && !loading ? 'pointer' : 'not-allowed',
-              opacity: isSupabaseReady ? 1 : 0.7,
+              cursor: loading ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s ease',
+              marginBottom: 16,
             }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24">
@@ -165,14 +292,8 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
             Continue with Google
           </button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0', color: '#94A3B8', fontSize: 11, fontWeight: 700 }}>
-            <div style={{ height: 1, background: '#E2E8F0', flex: 1 }} />
-            OR CONTINUE WITH EMAIL
-            <div style={{ height: 1, background: '#E2E8F0', flex: 1 }} />
-          </div>
-
           {isSupabaseReady && (
-            <div role="tablist" aria-label="Email authentication mode" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 3, marginBottom: 18, background: '#F1F5F9', borderRadius: 9 }}>
+            <div role="tablist" aria-label="Email authentication mode" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 3, marginBottom: 14, background: '#F1F5F9', borderRadius: 9 }}>
               {(['signin', 'signup'] as const).map(authMode => (
                 <button
                   key={authMode}
@@ -181,7 +302,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                   aria-selected={mode === authMode}
                   onClick={() => { setMode(authMode); setError(''); setNotice('') }}
                   style={{
-                    height: 32,
+                    height: 30,
                     border: 0,
                     borderRadius: 7,
                     background: mode === authMode ? '#FFFFFF' : 'transparent',
@@ -200,7 +321,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
           )}
 
           <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 12 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
                 Work Email (Gmail or Gcarbon)
               </label>
@@ -209,16 +330,15 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="your.name@gmail.com"
+                placeholder="your.email@gmail.com"
                 required
-                autoFocus
               />
             </div>
 
-            <div style={{ marginBottom: 18 }}>
+            <div style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>
-                  Password
+                  Password <span style={{ fontWeight: 400, color: '#94A3B8' }}>(optional for team)</span>
                 </label>
                 {isSupabaseReady && mode === 'signin' && (
                   <button
@@ -227,7 +347,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                     disabled={loading}
                     style={{ padding: 0, border: 0, background: 'none', color: '#64748B', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
                   >
-                    Forgot password?
+                    Forgot?
                   </button>
                 )}
               </div>
@@ -237,10 +357,9 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter password'}
+                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter password (or leave blank)'}
                   minLength={mode === 'signup' ? 8 : undefined}
                   style={{ paddingRight: 40 }}
-                  required
                 />
                 <button
                   type="button"
@@ -262,12 +381,6 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                   {showPassword ? '🙈' : '👁️'}
                 </button>
               </div>
-              {mode === 'signin' && (
-                <div style={{ fontSize: 11, color: '#64748B', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span>💡</span>
-                  <span>Default team password: <strong style={{ color: '#0F172A', fontWeight: 700 }}>gcarbon123</strong></span>
-                </div>
-              )}
             </div>
 
             {error && (
@@ -278,14 +391,14 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                 padding: '10px 14px',
                 fontSize: 12,
                 color: '#DC2626',
-                marginBottom: 16,
+                marginBottom: 14,
               }}>
                 {error}
               </div>
             )}
 
             {notice && (
-              <div role="status" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#047857', marginBottom: 16 }}>
+              <div role="status" style={{ background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#047857', marginBottom: 14 }}>
                 {notice}
               </div>
             )}
@@ -294,14 +407,14 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
               className="btn btn-primary"
               type="submit"
               disabled={loading}
-              style={{ width: '100%', justifyContent: 'center', height: 44, fontSize: 14, fontWeight: 600 }}
+              style={{ width: '100%', justifyContent: 'center', height: 42, fontSize: 14, fontWeight: 600 }}
             >
-              {loading ? <span className="spinner" style={{ borderTopColor: 'white' }} /> : mode === 'signup' ? 'Create Account' : 'Sign in →'}
+              {loading ? <span className="spinner" style={{ borderTopColor: 'white' }} /> : mode === 'signup' ? 'Create Account' : 'Sign In →'}
             </button>
           </form>
 
           {/* Secure Footnote */}
-          <div style={{ marginTop: 24, textAlign: 'center', fontSize: 11, color: '#94A3B8' }}>
+          <div style={{ marginTop: 20, textAlign: 'center', fontSize: 11, color: '#94A3B8' }}>
             🔒 Protected by 256-bit SSL encryption • www.gcarboncalling.com
           </div>
         </div>

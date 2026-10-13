@@ -9,6 +9,7 @@ import { outcomeToStatus } from './types'
 import { getISTDateStr, addDaysIST } from './date'
 import { KEYS, load, save, genId } from './store-helpers'
 import { isSupabaseReady, supabase } from './supabase'
+import { api } from './api'
 
 function persistRemoteWrite(
   label: string,
@@ -257,6 +258,7 @@ export function addCompany(data: Omit<Company, 'id' | 'created_at'>): Company {
   }
   save(KEYS.companies, [...companies, company])
   persistRemoteWrite('company upsert', () => supabase.from('companies').upsert(company, { onConflict: 'id' }))
+  void api.companies.save(company).catch(() => {})
   if (company.custom_fields && Object.keys(company.custom_fields).length > 0) {
     const list = getLists().find(item => item.id === company.list_id)
     setListColumns(company.list_id, [...(list?.columns || []), ...Object.keys(company.custom_fields)])
@@ -272,6 +274,7 @@ export function updateCompany(id: string, data: Partial<Company>): Company | nul
   companies[idx] = { ...companies[idx], ...data }
   save(KEYS.companies, companies)
   persistRemoteWrite('company update', () => supabase.from('companies').upsert(companies[idx], { onConflict: 'id' }))
+  void api.companies.update(id, data).catch(() => {})
   notifyDataChanged('update-company')
   return companies[idx]
 }
@@ -281,6 +284,7 @@ export function deleteCompany(id: string): void {
   save(KEYS.contacts, load<Contact>(KEYS.contacts).filter(c => c.company_id !== id))
   save(KEYS.call_logs, load<CallLog>(KEYS.call_logs).filter(l => l.company_id !== id))
   persistRemoteWrite('company delete', () => supabase.from('companies').delete().eq('id', id))
+  void api.companies.delete(id).catch(() => {})
   notifyDataChanged('delete-company')
 }
 
@@ -321,6 +325,7 @@ export function addContact(data: Omit<Contact, 'id'>): Contact {
   const contact: Contact = { id: genId(), ...data }
   save(KEYS.contacts, [...contacts, contact])
   persistRemoteWrite('contact upsert', () => supabase.from('contacts').upsert(contact, { onConflict: 'id' }))
+  void api.contacts.save(contact).catch(() => {})
   notifyDataChanged('add-contact')
   return contact
 }
@@ -332,6 +337,7 @@ export function updateContact(id: string, data: Partial<Contact>): Contact | nul
   contacts[idx] = { ...contacts[idx], ...data }
   save(KEYS.contacts, contacts)
   persistRemoteWrite('contact update', () => supabase.from('contacts').upsert(contacts[idx], { onConflict: 'id' }))
+  void api.contacts.save(contacts[idx]).catch(() => {})
   notifyDataChanged('update-contact')
   return contacts[idx]
 }
@@ -351,6 +357,7 @@ export function addCallLog(data: Omit<CallLog, 'id'>): CallLog {
   logs.push(log)
   save(KEYS.call_logs, logs)
   persistRemoteWrite('call log upsert', () => supabase.from('call_logs').upsert(log, { onConflict: 'id' }))
+  void api.calls.create(log).catch(() => {})
   
   // Update company status using derived logic
   const companies = load<Company>(KEYS.companies)
@@ -360,6 +367,7 @@ export function addCallLog(data: Omit<CallLog, 'id'>): CallLog {
     companies[compIdx].status = status
     save(KEYS.companies, companies)
     persistRemoteWrite('call status update', () => supabase.from('companies').upsert(companies[compIdx], { onConflict: 'id' }))
+    void api.companies.update(data.company_id, { status }).catch(() => {})
   }
 
   notifyDataChanged('add-call-log')

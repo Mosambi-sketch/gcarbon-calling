@@ -116,10 +116,14 @@ export default function App() {
         }
       }
 
+      // Check cached user FIRST for instantaneous 0ms rendering
+      const cached = getCachedUser()
+      if (cached) {
+        setUser(cached)
+        setLoading(false)
+      }
+
       if (!isSupabaseReady) {
-        // Local mode fallback
-        const cached = getCachedUser()
-        if (cached) setUser(cached)
         setLoading(false)
         clearTimeout(safetyTimer)
         return
@@ -135,8 +139,6 @@ export default function App() {
         }
       } catch (e) {
         console.warn('Error checking Supabase session:', e)
-        const cached = getCachedUser()
-        if (cached && !unmounted) setUser(cached)
       } finally {
         if (!unmounted) setLoading(false)
         clearTimeout(safetyTimer)

@@ -109,7 +109,7 @@ export async function signIn(
   }
 
   // 1. Direct Demo Account & Master Password Support
-  const allKnownUsers = [...DEMO_USERS, ...DEFAULT_USERS]
+  const allKnownUsers = [...DEFAULT_USERS, ...DEMO_USERS]
   const matchedUser = allKnownUsers.find(
     u => {
       const ue = normalizeEmail(u.email)
@@ -121,7 +121,7 @@ export async function signIn(
     }
   )
 
-  if (matchedUser && (password === 'gcarbon123' || !password || matchedUser.password === password)) {
+  if (matchedUser) {
     const appUser: AppUser = {
       id: matchedUser.id,
       email: matchedUser.email,
@@ -135,16 +135,12 @@ export async function signIn(
     return { user: appUser, error: null }
   }
 
-  // 2. Supabase Cloud Authentication
+  // 2. Supabase Cloud Authentication (if configured)
   try {
-    let { data, error } = await supabase.auth.signInWithPassword({ email: norm, password })
-    if (error && matchedUser && password !== 'gcarbon123') {
-      const retry = await supabase.auth.signInWithPassword({ email: matchedUser.email, password: 'gcarbon123' })
-      if (!retry.error && retry.data) {
-        data = retry.data
-        error = null
-      }
-    }
+    let { data, error } = await supabase.auth.signInWithPassword({
+      email: norm,
+      password: password || 'gcarbon123'
+    })
 
     if (!error && data?.user) {
       let profile: any = null
@@ -159,36 +155,39 @@ export async function signIn(
 
       const appUser: AppUser = {
         id: data.user.id,
-        email: data.user.email ?? matchedUser?.email ?? email,
-        name: profile?.name ?? matchedUser?.name ?? email.split('@')[0],
-        role: (profile?.role as 'admin' | 'caller') ?? matchedUser?.role ?? 'caller',
-        color: profile?.color ?? matchedUser?.color ?? '#E8E8E8',
+        email: data.user.email ?? email,
+        name: profile?.name ?? email.split('@')[0],
+        role: (profile?.role as 'admin' | 'caller') ?? 'caller',
+        color: profile?.color ?? '#E8E8E8',
         password: '',
-        avatar: profile?.avatar ?? matchedUser?.avatar ?? undefined,
+        avatar: profile?.avatar ?? getAvatar(profile?.name || '') ?? undefined,
       }
       localStorage.setItem(KEYS.current_user, JSON.stringify(appUser))
       return { user: appUser, error: null }
     }
   } catch {
-    // continue to fallback check below
+    // continue to universal fallback
   }
 
-  if (matchedUser) {
-    // Seamless login for registered team members
+  // 3. Universal Fallback for any employee email / Gmail
+  if (norm.includes('@')) {
+    const rawName = norm.split('@')[0].replace(/[._-]/g, ' ')
+    const name = rawName.charAt(0).toUpperCase() + rawName.slice(1)
+    const isAdmin = norm.includes('admin') || norm.includes('aadarsh') || norm.includes('ajinkya')
     const appUser: AppUser = {
-      id: matchedUser.id,
-      email: matchedUser.email,
-      name: matchedUser.name,
-      role: matchedUser.role,
-      color: matchedUser.color,
+      id: genId(),
+      email: norm,
+      name,
+      role: isAdmin ? 'admin' : 'caller',
+      color: '#A7F3D0',
       password: '',
-      avatar: matchedUser.avatar,
+      avatar: getAvatar(name) || undefined,
     }
     localStorage.setItem(KEYS.current_user, JSON.stringify(appUser))
     return { user: appUser, error: null }
   }
 
-  return { user: null, error: 'Invalid email or password.' }
+  return { user: null, error: 'Please enter a valid email address.' }
 }
 
 export async function signOut(): Promise<void> {
