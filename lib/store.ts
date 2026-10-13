@@ -64,11 +64,11 @@ export const DEFAULT_USERS: AppUser[] = [
   { id: 'user-himanshi', email: 'himanshi.gcarbon@gmail.com', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: '', avatar: '/avatars/himanshi-face.jpg' },
   { id: 'user-ankesh', email: 'ankesh.gcarbon@gmail.com', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: '', avatar: '/avatars/ankesh-face.jpg' },
   { id: 'user-kunal', email: 'kunal.gcarbon114@gmail.com', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: '', avatar: '/avatars/kunal-face.jpg' },
-  { id: 'user-ajinkya', email: 'ajinkya.gcarbon@gmail.com', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: '', avatar: '/avatars/ajinkya-face.png' },
+  { id: 'user-ajinkya', email: 'ajinkya.gcarbon@gmail.com', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: '', avatar: '/avatars/ajinkya-face.png' },
 ]
 
 export const DEMO_USERS: AppUser[] = [
-  { id: 'user-ajinkya-demo', email: 'ajinkya@gcarbon.in', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
+  { id: 'user-ajinkya-demo', email: 'ajinkya@gcarbon.in', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: 'gcarbon123', avatar: '/avatars/ajinkya-face.png' },
   { id: 'user-aadarsh-demo', email: 'aadarsh@gcarbon.in', name: 'Aadarsh', role: 'admin', color: '#A7F3D0', password: 'gcarbon123', avatar: '/avatars/aadarsh-face.jpg' },
   { id: 'user-tamanna-demo', email: 'tamanna@gcarbon.in', name: 'Tamanna', role: 'caller', color: '#E8894F', password: 'gcarbon123', avatar: '/avatars/tamanna-face.jpg' },
   { id: 'user-himanshi-demo', email: 'himanshi@gcarbon.in', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: 'gcarbon123', avatar: '/avatars/himanshi-face.jpg' },
@@ -83,8 +83,19 @@ export function normalizeEmail(email: string): string {
 }
 
 export function isAuthorizedEmployee(email: string): boolean {
-  return Boolean(email && email.trim())
+  if (!email || !email.trim()) return false
+  const norm = normalizeEmail(email)
+  const allKnown = [...DEFAULT_USERS, ...DEMO_USERS]
+  return allKnown.some(u => {
+    const ue = normalizeEmail(u.email)
+    return ue === norm ||
+      ue.replace('@gmail.com', '@gcarbon.in') === norm ||
+      ue.replace('@gcarbon.in', '@gmail.com') === norm ||
+      ue.split('@')[0] === norm.split('@')[0] ||
+      ue.split('@')[0].replace('.gcarbon', '').replace('114', '') === norm.split('@')[0].replace('.gcarbon', '').replace('114', '')
+  })
 }
+
 
 export function getUsers(): AppUser[] {
   const stored = load<AppUser>(KEYS.users)

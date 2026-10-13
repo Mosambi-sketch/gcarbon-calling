@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { sendPasswordReset, signIn, signInWithGoogle, signUpWithCompanyEmail } from '@/lib/db'
 import { isSupabaseReady } from '@/lib/supabase'
 import type { AppUser } from '@/lib/store'
+import { isAuthorizedEmployee } from '@/lib/store'
 
 interface QuickMember {
   name: string
@@ -19,7 +20,7 @@ const TEAM_MEMBERS: QuickMember[] = [
   { name: 'Kunal', email: 'kunal.gcarbon114@gmail.com', role: 'caller', color: '#C4B5FD', avatar: '/avatars/kunal-face.jpg' },
   { name: 'Ankesh', email: 'ankesh.gcarbon@gmail.com', role: 'caller', color: '#93C5FD', avatar: '/avatars/ankesh-face.jpg' },
   { name: 'Pranita', email: 'pranita.gcarbon@gmail.com', role: 'caller', color: '#F472B6', avatar: '/avatars/pranita-face.jpg' },
-  { name: 'Ajinkya', email: 'ajinkya.gcarbon@gmail.com', role: 'admin', color: '#D9F56B', avatar: '/avatars/ajinkya-face.png' },
+  { name: 'Ajinkya', email: 'ajinkya.gcarbon@gmail.com', role: 'caller', color: '#D9F56B', avatar: '/avatars/ajinkya-face.png' },
 ]
 
 export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: AppUser) => void; authError?: string }) {
@@ -30,6 +31,10 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+
+  useEffect(() => {
+    if (authError) setError(authError)
+  }, [authError])
 
   const handleQuickLogin = async (member: QuickMember) => {
     setLoading(true)
@@ -54,6 +59,13 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
     setLoading(true)
     setError('')
     setNotice('')
+
+    if (!isAuthorizedEmployee(email)) {
+      setError(`Access denied: "${email}" is not an authorized company employee. Only team members approved by Admin (Aadarsh) can log in.`)
+      setLoading(false)
+      return
+    }
+
     try {
       if (mode === 'signup') {
         const result = await signUpWithCompanyEmail(email, password)
@@ -167,6 +179,26 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
           boxShadow: '0 8px 30px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)',
           border: '1px solid #E2E8F0',
         }}>
+          {/* Security Notice */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            padding: '7px 12px',
+            background: '#F8FAFC',
+            border: '1px solid #E2E8F0',
+            borderRadius: 10,
+            fontSize: 11,
+            color: '#475569',
+            fontWeight: 600,
+            marginBottom: 18,
+            textAlign: 'center',
+          }}>
+            <span>🔒</span>
+            <span>Restricted: Company employees only. Access managed by Admin (Aadarsh).</span>
+          </div>
+
           {/* 1-Click Team Member Sign In */}
           <div style={{ marginBottom: 22 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>

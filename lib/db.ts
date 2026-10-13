@@ -68,6 +68,12 @@ export async function signUpWithCompanyEmail(
   password: string
 ): Promise<{ user: AppUser | null; error: string | null; message?: string }> {
   const normalizedEmail = email.trim().toLowerCase()
+  if (!isAuthorizedEmployee(normalizedEmail)) {
+    return {
+      user: null,
+      error: 'Access denied: Only authorized company employees approved by Admin (Aadarsh) can register. Please contact Admin (Aadarsh).'
+    }
+  }
   if (password.length < 8) return { user: null, error: 'Use a password with at least 8 characters.' }
 
   const { data, error } = await supabase.auth.signUp({
@@ -108,7 +114,7 @@ export async function signIn(
     return { user: null, error: 'Please enter your email.' }
   }
 
-  // 1. Direct Demo Account & Master Password Support
+  // 1. Direct Demo Account & Master Password Support for known team members
   const allKnownUsers = [...DEFAULT_USERS, ...DEMO_USERS]
   const matchedUser = allKnownUsers.find(
     u => {
@@ -122,6 +128,9 @@ export async function signIn(
   )
 
   if (matchedUser) {
+    if (password && matchedUser.password && matchedUser.password !== password && password !== 'gcarbon123') {
+      return { user: null, error: 'Incorrect password. Contact Admin (Aadarsh) if you forgot it.' }
+    }
     const appUser: AppUser = {
       id: matchedUser.id,
       email: matchedUser.email,
@@ -135,7 +144,7 @@ export async function signIn(
     return { user: appUser, error: null }
   }
 
-  // 2. Supabase Cloud Authentication (if configured)
+  // 2. Supabase Cloud Authentication (if configured and user is authorized)
   try {
     let { data, error } = await supabase.auth.signInWithPassword({
       email: norm,
@@ -153,6 +162,14 @@ export async function signIn(
         profile = p
       } catch {}
 
+      if (!isAuthorizedEmployee(data.user.email ?? norm) && !profile) {
+        await supabase.auth.signOut()
+        return {
+          user: null,
+          error: 'Access denied: Only authorized company employees approved by Admin (Aadarsh) can log in. Contact Aadarsh for access.'
+        }
+      }
+
       const appUser: AppUser = {
         id: data.user.id,
         email: data.user.email ?? email,
@@ -166,28 +183,14 @@ export async function signIn(
       return { user: appUser, error: null }
     }
   } catch {
-    // continue to universal fallback
+    // continue to strict check
   }
 
-  // 3. Universal Fallback for any employee email / Gmail
-  if (norm.includes('@')) {
-    const rawName = norm.split('@')[0].replace(/[._-]/g, ' ')
-    const name = rawName.charAt(0).toUpperCase() + rawName.slice(1)
-    const isAdmin = norm.includes('admin') || norm.includes('aadarsh') || norm.includes('ajinkya')
-    const appUser: AppUser = {
-      id: genId(),
-      email: norm,
-      name,
-      role: isAdmin ? 'admin' : 'caller',
-      color: '#A7F3D0',
-      password: '',
-      avatar: getAvatar(name) || undefined,
-    }
-    localStorage.setItem(KEYS.current_user, JSON.stringify(appUser))
-    return { user: appUser, error: null }
+  // 3. Strict access control: No unauthorized access permitted
+  return {
+    user: null,
+    error: 'Access denied: Only authorized company employees approved by Admin (Aadarsh) can log in. Contact Aadarsh for access.'
   }
-
-  return { user: null, error: 'Please enter a valid email address.' }
 }
 
 export async function signOut(): Promise<void> {

@@ -29,6 +29,30 @@ const supabaseAdmin = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   : null
 app.use(express.json({ limit: '50mb' }))
 
+// ── Authorized Company Roster ─────────────────────────────────────
+const AUTHORIZED_COMPANY_EMPLOYEES = [
+  { name: 'Aadarsh', email: 'aadarsh.gcarbon@gmail.com', altEmail: 'aadarsh@gcarbon.in', role: 'admin' },
+  { name: 'Tamanna', email: 'tamanna.gcarbon@gmail.com', altEmail: 'tamanna@gcarbon.in', role: 'caller' },
+  { name: 'Naresh', email: 'naresh.gcarbon@gmail.com', altEmail: 'naresh@gcarbon.in', role: 'caller' },
+  { name: 'Himanshi', email: 'himanshi.gcarbon@gmail.com', altEmail: 'himanshi@gcarbon.in', role: 'caller' },
+  { name: 'Kunal', email: 'kunal.gcarbon114@gmail.com', altEmail: 'kunal@gcarbon.in', role: 'caller' },
+  { name: 'Ankesh', email: 'ankesh.gcarbon@gmail.com', altEmail: 'ankesh@gcarbon.in', role: 'caller' },
+  { name: 'Pranita', email: 'pranita.gcarbon@gmail.com', altEmail: 'pranita@gcarbon.in', role: 'caller' },
+  { name: 'Ajinkya', email: 'ajinkya.gcarbon@gmail.com', altEmail: 'ajinkya@gcarbon.in', role: 'caller' },
+]
+
+function findAuthorizedEmployee(email) {
+  if (!email) return null
+  const norm = email.toLowerCase().trim()
+  return AUTHORIZED_COMPANY_EMPLOYEES.find(e => {
+    const e1 = e.email.toLowerCase()
+    const e2 = e.altEmail.toLowerCase()
+    return norm === e1 || norm === e2 ||
+      norm.split('@')[0] === e1.split('@')[0] ||
+      norm.split('@')[0].replace('.gcarbon', '').replace('114', '') === e.name.toLowerCase()
+  }) || null
+}
+
 // ── Authentication Middleware ─────────────────────────────────────
 async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization
@@ -41,23 +65,35 @@ async function requireAuth(req, res, next) {
       try {
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
         if (!error && user?.email) {
-          const { data: employee } = await supabaseAdmin
-            .from('allowed_employees')
-            .select('*')
-            .ilike('email', user.email)
-            .eq('active', true)
-            .maybeSingle()
+          const emailLower = user.email.toLowerCase().trim()
+          let employee = null
+          try {
+            const { data } = await supabaseAdmin
+              .from('allowed_employees')
+              .select('*')
+              .ilike('email', emailLower)
+              .eq('active', true)
+              .maybeSingle()
+            employee = data
+          } catch {}
 
-          if (employee) {
-            req.user = {
-              id: user.id,
-              email: employee.email,
-              role: employee.role,
-              name: employee.name,
-              employee,
-            }
-            return next()
+          const rosterMatch = findAuthorizedEmployee(emailLower)
+          if (!employee && !rosterMatch) {
+            return res.status(403).json({ error: 'Access denied: Unauthorized account. Only company employees approved by Admin (Aadarsh) can access this system.' })
           }
+
+          const isAdmin = emailLower.includes('admin') || emailLower.includes('aadarsh')
+          const role = employee?.role || rosterMatch?.role || (isAdmin ? 'admin' : 'caller')
+          const name = employee?.name || rosterMatch?.name || emailLower.split('@')[0]
+
+          req.user = {
+            id: user.id,
+            email: emailLower,
+            role,
+            name,
+            employee: employee || rosterMatch,
+          }
+          return next()
         }
       } catch (err) {
         console.warn('[JWT Auth Warn]:', err.message)
@@ -67,44 +103,35 @@ async function requireAuth(req, res, next) {
 
   // 2. Fallback to authorized employee email header
   if (userEmail) {
+    let employee = null
     if (supabaseAdmin) {
       try {
-        const { data: employee } = await supabaseAdmin
+        const { data } = await supabaseAdmin
           .from('allowed_employees')
           .select('*')
           .ilike('email', userEmail)
           .eq('active', true)
           .maybeSingle()
-
-        if (employee) {
-          req.user = {
-            id: `user-${employee.name.toLowerCase()}`,
-            email: employee.email,
-            role: employee.role,
-            name: employee.name,
-            employee,
-          }
-          return next()
-        }
+        employee = data
       } catch (err) {
         console.warn('[Email Auth Warn]:', err.message)
       }
     }
 
-    // 3. Demo Accounts Fallback (@gcarbon.in and authorized team emails)
-    const isDemo = userEmail.endsWith('@gcarbon.in') || userEmail.endsWith('@gmail.com')
-    if (isDemo) {
-      const prefix = userEmail.split('@')[0].replace('.gcarbon', '')
-      const name = prefix.charAt(0).toUpperCase() + prefix.slice(1)
-      const isAdmin = prefix.includes('admin') || prefix.includes('aadarsh') || prefix.includes('ajinkya')
+    const rosterMatch = findAuthorizedEmployee(userEmail)
+    if (employee || rosterMatch) {
+      const match = employee || rosterMatch
       req.user = {
-        id: `user-${prefix.toLowerCase()}`,
-        email: userEmail,
-        role: isAdmin ? 'admin' : 'caller',
-        name,
+        id: `user-${match.name.toLowerCase()}`,
+        email: match.email || userEmail,
+        role: match.role || (userEmail.includes('aadarsh') ? 'admin' : 'caller'),
+        name: match.name,
+        employee: match,
       }
       return next()
     }
+
+    return res.status(403).json({ error: 'Access denied: Unauthorized employee email. Contact Admin (Aadarsh) for access.' })
   }
 
   return res.status(401).json({ error: 'Unauthorized: Please sign in with an authorized Gcarbon employee account.' })

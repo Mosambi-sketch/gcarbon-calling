@@ -4,7 +4,7 @@ import { supabase, isSupabaseReady } from '@/lib/supabase'
 import LoginPage from '@/components/LoginPage'
 import AppShell from '@/components/AppShell'
 import type { AppUser } from '@/lib/store'
-import { DEFAULT_USERS, DEMO_USERS, normalizeEmail } from '@/lib/store'
+import { DEFAULT_USERS, DEMO_USERS, normalizeEmail, isAuthorizedEmployee } from '@/lib/store'
 import { getAvatar } from '@/lib/types'
 import { Toaster, toast } from 'react-hot-toast'
 import ErrorBoundary from '@/components/ErrorBoundary'
@@ -88,17 +88,28 @@ export default function App() {
         console.warn('Could not load profile from Supabase, creating fallback:', err)
       }
 
-      // Fallback: build app user from metadata or known roster
-      const name = known?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || email.split('@')[0]
-      const role = known?.role || (email.includes('aadarsh') || email.includes('ajinkya') ? 'admin' : 'caller')
+      // Reject any user who is not an authorized company employee
+      if (!known && !profile) {
+        console.warn('Unauthorized login attempt:', email)
+        try {
+          await supabase.auth.signOut()
+        } catch {}
+        localStorage.removeItem('gc_current_user')
+        setAuthError(`Access denied: "${email}" is not an authorized company employee. Only team members approved by Admin (Aadarsh) can access the CRM.`)
+        return null
+      }
+
+      // Build app user from profile or known roster
+      const name = profile?.name || known?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || email.split('@')[0]
+      const role = (profile?.role as 'admin' | 'caller') || known?.role || (email.includes('aadarsh') ? 'admin' : 'caller')
       const fallbackUser: AppUser = {
         id: sessionUser.id,
         email,
         name,
         role,
-        color: known?.color || '#A7F3D0',
+        color: profile?.color || known?.color || '#A7F3D0',
         password: '',
-        avatar: known?.avatar || sessionUser.user_metadata?.avatar_url || getAvatar(name) || undefined,
+        avatar: profile?.avatar || known?.avatar || sessionUser.user_metadata?.avatar_url || getAvatar(name) || undefined,
       }
       localStorage.setItem('gc_current_user', JSON.stringify(fallbackUser))
       return fallbackUser
@@ -119,8 +130,13 @@ export default function App() {
       // Check cached user FIRST for instantaneous 0ms rendering
       const cached = getCachedUser()
       if (cached) {
-        setUser(cached)
-        setLoading(false)
+        if (isAuthorizedEmployee(cached.email)) {
+          setUser(cached)
+          setLoading(false)
+        } else {
+          localStorage.removeItem('gc_current_user')
+          setUser(null)
+        }
       }
 
       if (!isSupabaseReady) {
