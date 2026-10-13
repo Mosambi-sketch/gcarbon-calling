@@ -55,10 +55,14 @@ export async function getAppUserFromSupabaseUser(authUser: SupabaseUser): Promis
 
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
   try {
+    const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    const redirectUrl = isLocal
+      ? window.location.origin
+      : 'https://gcarbon-calling-acme-fb0a.vercel.app'
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: redirectUrl,
       },
     })
     if (error) return { error: error.message }

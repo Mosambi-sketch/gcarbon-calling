@@ -127,7 +127,7 @@ export default function WorkspaceSpreadsheet({
     setIsSyncingLive(true)
     const t = toast.loading('Syncing latest updates from live SharePoint Excel...')
     try {
-      const res = await fetch('http://localhost:3001/api/sync/sharepoint', { method: 'POST' })
+      const res = await fetch('/api/sync/sharepoint', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         toast.success(`Synced live Excel! ${data.totalCompanies} companies updated on-time.`, { id: t })
