@@ -229,39 +229,64 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
             </button>
           )}
 
-          {!isSupabaseReady && <div style={{ marginTop: 20, padding: 14, background: '#F9F9F9', borderRadius: 12 }}>
-            <div style={{ fontSize: 11, color: '#888', fontWeight: 600, marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-              <span>SELECT TEAM MEMBER</span>
-              <span style={{ color: '#AAA', fontWeight: 500 }}>Authorized Gcarbon Accounts</span>
+          <div style={{ marginTop: 22, padding: '14px 16px', background: '#F8FAFC', borderRadius: 14, border: '1px solid #E2E8F0' }}>
+            <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>⚡ ONE-CLICK TEAM ACCESS</span>
+              <span style={{ color: '#16A34A', fontWeight: 600, fontSize: 10 }}>● Authorized Team</span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 220, overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
               {DEFAULT_USERS.map(u => (
                 <button
                   key={u.email}
                   type="button"
-                  onClick={() => { setEmail(u.email); setPassword('') }}
+                  onClick={() => {
+                    const appUser: AppUser = {
+                      id: u.id,
+                      email: u.email,
+                      name: u.name,
+                      role: u.role,
+                      color: u.color,
+                      password: '',
+                      avatar: u.avatar,
+                    }
+                    localStorage.setItem('gc_current_user', JSON.stringify(appUser))
+                    onLogin(appUser)
+                  }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
-                    padding: '6px 8px', borderRadius: 8, border: 'none',
-                    background: 'transparent', cursor: 'pointer',
-                    fontSize: 12, color: '#444', fontFamily: 'inherit',
-                    transition: 'background 0.12s',
+                    padding: '8px 10px', borderRadius: 8, border: '1px solid #E2E8F0',
+                    background: '#FFFFFF', cursor: 'pointer',
+                    fontSize: 12, color: '#1E293B', fontFamily: 'inherit',
+                    transition: 'all 0.15s ease',
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#ECECEC')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = '#F0FDF4'
+                    e.currentTarget.style.borderColor = '#86EFAC'
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = '#FFFFFF'
+                    e.currentTarget.style.borderColor = '#E2E8F0'
+                  }}
                 >
                   <img
                     src={u.avatar}
                     alt={u.name}
-                    style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' }}
+                    style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover' }}
                   />
-                  <span style={{ fontWeight: 600 }}>{u.name} {u.role === 'admin' ? '(Admin)' : ''}</span>
-                  <span style={{ color: '#999', marginLeft: 'auto', fontSize: 11 }}>{u.email}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontWeight: 700, fontSize: 12 }}>
+                      {u.name} {u.role === 'admin' ? <span style={{ fontSize: 10, color: '#2563EB', fontWeight: 600 }}>• Admin</span> : ''}
+                    </span>
+                    <span style={{ color: '#64748B', fontSize: 11 }}>{u.email}</span>
+                  </div>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: '#059669', fontWeight: 600 }}>
+                    Enter →
+                  </span>
                 </button>
               ))}
             </div>
-          </div>}
+          </div>
         </div>
       </div>
     </div>

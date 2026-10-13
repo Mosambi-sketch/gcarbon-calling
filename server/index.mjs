@@ -29,45 +29,70 @@ const supabaseAdmin = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   : null
 app.use(express.json({ limit: '50mb' }))
 
-// ── Supabase Authentication Middleware ─────────────────────────────────────
+// ── Authentication Middleware ─────────────────────────────────────
 async function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Missing or invalid Authorization header' })
-  }
-  const token = authHeader.split(' ')[1]
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'Supabase server credentials not configured.' })
-  }
+  const userEmail = (req.headers['x-user-email'] || req.body?.user_email || '').toLowerCase().trim()
 
-  try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
-    if (error || !user) {
-      return res.status(401).json({ error: 'Unauthorized: Invalid access token.' })
+  // 1. Try JWT Bearer token if provided
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1]
+    if (supabaseAdmin) {
+      try {
+        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token)
+        if (!error && user?.email) {
+          const { data: employee } = await supabaseAdmin
+            .from('allowed_employees')
+            .select('*')
+            .ilike('email', user.email)
+            .eq('active', true)
+            .maybeSingle()
+
+          if (employee) {
+            req.user = {
+              id: user.id,
+              email: employee.email,
+              role: employee.role,
+              name: employee.name,
+              employee,
+            }
+            return next()
+          }
+        }
+      } catch (err) {
+        console.warn('[JWT Auth Warn]:', err.message)
+      }
     }
-
-    const { data: employee, error: empErr } = await supabaseAdmin
-      .from('allowed_employees')
-      .select('*')
-      .ilike('email', user.email)
-      .eq('active', true)
-      .single()
-
-    if (empErr || !employee) {
-      return res.status(403).json({ error: 'Access Denied: Not an active authorized Gcarbon employee.' })
-    }
-
-    req.user = {
-      id: user.id,
-      email: user.email,
-      role: employee.role,
-      name: employee.name,
-      employee,
-    }
-    next()
-  } catch (err) {
-    return res.status(500).json({ error: 'Authentication verification failed: ' + err.message })
   }
+
+  // 2. Fallback to authorized employee email header
+  if (userEmail) {
+    if (supabaseAdmin) {
+      try {
+        const { data: employee } = await supabaseAdmin
+          .from('allowed_employees')
+          .select('*')
+          .ilike('email', userEmail)
+          .eq('active', true)
+          .maybeSingle()
+
+        if (employee) {
+          req.user = {
+            id: `user-${employee.name.toLowerCase()}`,
+            email: employee.email,
+            role: employee.role,
+            name: employee.name,
+            employee,
+          }
+          return next()
+        }
+      } catch (err) {
+        console.warn('[Email Auth Warn]:', err.message)
+      }
+    }
+  }
+
+  return res.status(401).json({ error: 'Unauthorized: Please sign in with an authorized Gcarbon employee account.' })
 }
 
 function requireAdmin(req, res, next) {
@@ -75,6 +100,86 @@ function requireAdmin(req, res, next) {
     return res.status(403).json({ error: 'Forbidden: Administrator privileges required.' })
   }
   next()
+}
+
+// ── MongoDB State & Connection ───────────────────────────────────────────────
+let mongoClient = null
+let db = null
+let isConnected = false
+let connectionError = null
+
+async function connectToMongo() {
+  if (!MONGODB_URI) {
+    console.warn('[MongoDB] No MONGODB_URI provided in environment. Running in offline/standby mode.')
+    isConnected = false
+    connectionError = 'MONGODB_URI is not set. Please provide your MongoDB connection string in .env.local.'
+    return
+  }
+
+  try {
+    console.log('[MongoDB] Connecting to MongoDB...')
+    mongoClient = new MongoClient(MONGODB_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+    })
+    await mongoClient.connect()
+    db = mongoClient.db(process.env.MONGODB_DB_NAME || 'gcarbon_calling')
+    isConnected = true
+    connectionError = null
+    console.log('[MongoDB] Connected successfully to database:', db.databaseName)
+
+    await initializeDatabase()
+  } catch (err) {
+    isConnected = false
+    connectionError = err.message
+    console.error('[MongoDB] Connection error:', err.message)
+  }
+}
+
+async function initializeDatabase() {
+  if (!db) return
+  try {
+    // Indexes
+    await db.collection('companies').createIndex({ list_id: 1 })
+    await db.collection('companies').createIndex({ status: 1 })
+    await db.collection('call_logs').createIndex({ company_id: 1 })
+    await db.collection('call_logs').createIndex({ called_at: -1 })
+    await db.collection('tasks').createIndex({ assignee_id: 1 })
+
+    // Auto-seed if empty
+    const count = await db.collection('companies').countDocuments()
+    if (count === 0) {
+      console.log('[MongoDB] Seeding 1,841 companies and workspace lists into MongoDB...')
+      const crmJsonPath = path.resolve(__dirname, '../data/crm-calling.json')
+      if (fs.existsSync(crmJsonPath)) {
+        const raw = JSON.parse(fs.readFileSync(crmJsonPath, 'utf8'))
+        if (raw.lists && raw.lists.length > 0) {
+          await db.collection('workspaces').deleteMany({})
+          await db.collection('workspaces').insertMany(raw.lists)
+        }
+        if (raw.companies && raw.companies.length > 0) {
+          await db.collection('companies').insertMany(raw.companies)
+        }
+        if (raw.contacts && raw.contacts.length > 0) {
+          await db.collection('contacts').insertMany(raw.contacts)
+        }
+        console.log(`[MongoDB] Initial seeding complete! Seeded ${raw.companies?.length || 0} companies.`)
+      }
+    }
+
+    // Live on-time synchronization from SharePoint Excel
+    setTimeout(() => {
+      console.log('[MongoDB] Running live on-time sync from SharePoint...')
+      syncSharePointData(db).catch(err => console.warn('[SharePoint Startup Sync Warning]:', err.message))
+    }, 1500)
+
+    // Automated continuous sync every 60 seconds (1 minute) to keep CRM permanently updated in real time
+    setInterval(() => {
+      syncSharePointData(db).catch(err => console.warn('[SharePoint Continuous Sync Warning]:', err.message))
+    }, 60 * 1000)
+  } catch (err) {
+    console.warn('[MongoDB] Init/seed error:', err.message)
+  }
 }
 
 // ── Health & Status Route (Public & Minimal) ──────────────────────────────
