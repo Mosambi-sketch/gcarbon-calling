@@ -63,7 +63,7 @@ export const DEFAULT_USERS: AppUser[] = [
   { id: 'user-himanshi', email: 'himanshi.gcarbon@gmail.com', name: 'Himanshi', role: 'caller', color: '#F9E1D2', password: '', avatar: '/avatars/himanshi-face.jpg' },
   { id: 'user-ankesh', email: 'ankesh.gcarbon@gmail.com', name: 'Ankesh', role: 'caller', color: '#93C5FD', password: '', avatar: '/avatars/ankesh-face.jpg' },
   { id: 'user-kunal', email: 'kunal.gcarbon114@gmail.com', name: 'Kunal', role: 'caller', color: '#C4B5FD', password: '', avatar: '/avatars/kunal-face.jpg' },
-  { id: 'user-ajinkya', email: 'ajnikya.gcarbon@gmail.com', name: 'Ajinkya', role: 'caller', color: '#D9F56B', password: '', avatar: '/avatars/ajinkya-face.png' },
+  { id: 'user-ajinkya', email: 'ajinkya.gcarbon@gmail.com', name: 'Ajinkya', role: 'admin', color: '#D9F56B', password: '', avatar: '/avatars/ajinkya-face.png' },
 ]
 
 export const DEMO_USERS: AppUser[] = [
