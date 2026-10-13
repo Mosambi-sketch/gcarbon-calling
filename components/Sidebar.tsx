@@ -84,6 +84,7 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [activeY, setActiveY] = useState<number>(140)
   const [sidebarHeight, setSidebarHeight] = useState<number>(750)
+  const [showMobileAccount, setShowMobileAccount] = useState(false)
 
   // Measure active tab center Y and sidebar height
   useEffect(() => {
@@ -203,16 +204,56 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
                 onKeyDown={e => e.key === 'Enter' && onNavigate(item.id)}
               >
                 <div className="icon-slot">
-                  {/* When active, the icon is rendered inside the floating white disc */}
-                  {!isActive && <SvgIcon name={item.id} active={false} />}
+                  <span className="desktop-only-inactive">
+                    {!isActive && <SvgIcon name={item.id} active={false} />}
+                  </span>
+                  <span className="mobile-only-icon">
+                    <SvgIcon name={item.id} active={isActive} />
+                  </span>
                 </div>
                 <span className="sidebar-tooltip">{item.label}</span>
               </div>
             )
           })}
+
+          {/* Mobile Profile Trigger Button */}
+          <div
+            className="fluid-nav-item mobile-only-icon"
+            onClick={() => setShowMobileAccount(true)}
+            role="button"
+            tabIndex={0}
+            title="My Profile & Options"
+          >
+            <div
+              className="icon-slot"
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: '50%',
+                overflow: 'hidden',
+                background: user.color || '#D9F56B',
+                border: '1.5px solid rgba(255,255,255,0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {userAvatar ? (
+                <img
+                  src={userAvatar}
+                  alt={user.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#09090B' }}>
+                  {getInitials(user.name)}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Bottom Section: Profile Face Avatar, Theme Toggle & Logout */}
+        {/* Bottom Section: Profile Face Avatar, Theme Toggle & Logout (Desktop) */}
         <div className="sidebar-bottom-wrap">
           {/* User Face Avatar */}
           <div className="sidebar-avatar-wrap">
@@ -284,6 +325,132 @@ export default function Sidebar({ user, activePage, onNavigate, onLogout, isAdmi
             <span className="sidebar-tooltip">Sign out</span>
           </div>
         </div>
+
+        {/* Mobile Account Bottom Sheet */}
+        {showMobileAccount && (
+          <div
+            className="modal-overlay"
+            onClick={() => setShowMobileAccount(false)}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.6)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+            }}
+          >
+            <div
+              className="modal"
+              onClick={e => e.stopPropagation()}
+              style={{
+                width: '100%',
+                maxWidth: 440,
+                borderRadius: '20px 20px 0 0',
+                background: 'var(--card, #FFFFFF)',
+                padding: '20px 20px calc(24px + env(safe-area-inset-bottom, 0px)) 20px',
+                boxShadow: '0 -10px 30px rgba(0,0,0,0.3)',
+                animation: 'slideUp 0.2s ease-out',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '50%',
+                      background: user.color || '#D9F56B',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      color: '#09090B',
+                    }}
+                  >
+                    {userAvatar ? (
+                      <img src={userAvatar} alt={user.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      getInitials(user.name)
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 16 }}>{user.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {user.email || 'CRM Member'} · <span style={{ textTransform: 'capitalize' }}>{user.role}</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowMobileAccount(false)}
+                  style={{ fontSize: 16 }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const html = document.documentElement
+                    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'
+                    html.setAttribute('data-theme', next)
+                    localStorage.setItem('gc_theme', next)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    background: 'var(--surface-1, #F3F4F6)',
+                    border: 'none',
+                    fontWeight: 600,
+                    fontSize: 14,
+                  }}
+                >
+                  <span>🌓 Appearance / Theme</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Toggle</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setShowMobileAccount(false)
+                    onLogout()
+                  }}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 10,
+                    background: '#FEE2E2',
+                    color: '#DC2626',
+                    border: 'none',
+                    fontWeight: 600,
+                    fontSize: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    marginTop: 6,
+                  }}
+                >
+                  <SvgIcon name="logout" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </nav>
   )

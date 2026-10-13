@@ -7,6 +7,7 @@ import { format, parseISO } from 'date-fns'
 export default function NotesPage({ user }: { user: AppUser }) {
   const [notes, setNotes] = useState<Note[]>([])
   const [selectedNote, setSelectedNote] = useState<Note | null>(null)
+  const [mobileView, setMobileView] = useState<'list' | 'editor'>('list')
   const [search, setSearch] = useState('')
   const [editTitle, setEditTitle] = useState('')
   const [editBody, setEditBody] = useState('')
@@ -32,6 +33,7 @@ export default function NotesPage({ user }: { user: AppUser }) {
     setSelectedNote(note)
     setEditTitle(note.title)
     setEditBody(note.body)
+    setMobileView('editor')
   }
 
   useEffect(() => {
@@ -55,6 +57,7 @@ export default function NotesPage({ user }: { user: AppUser }) {
     })
     const loaded = loadNotes()
     selectNote(note)
+    setMobileView('editor')
   }
 
   const handleDelete = (id: string) => {
@@ -114,15 +117,11 @@ export default function NotesPage({ user }: { user: AppUser }) {
         <button className="btn btn-primary" onClick={handleNewNote}>+ New Note</button>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="notes-body-layout">
         {/* Notes list sidebar */}
-        <div style={{ 
-          width: 260, borderRight: '1px solid #F0F0F0', 
-          display: 'flex', flexDirection: 'column', flexShrink: 0,
-          overflow: 'hidden',
-        }}>
+        <div className={`notes-sidebar ${mobileView === 'editor' ? 'hide-on-mobile' : ''}`}>
           {/* Search */}
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid #F0F0F0' }}>
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
             <div className="search-input">
               <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="#AAA" strokeWidth={2}>
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -178,12 +177,20 @@ export default function NotesPage({ user }: { user: AppUser }) {
 
         {/* Editor */}
         {selectedNote ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className={`notes-editor-pane ${mobileView === 'list' ? 'hide-on-mobile' : ''}`}>
             {/* Editor toolbar */}
             <div style={{ 
-              padding: '10px 20px', borderBottom: '1px solid #F0F0F0',
-              display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+              padding: '10px 16px', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
             }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm notes-mobile-back"
+                onClick={() => setMobileView('list')}
+                style={{ padding: '4px 8px', fontSize: 12 }}
+              >
+                ← Notes
+              </button>
               <div style={{ flex: 1 }}>
                 <input
                   style={{ 

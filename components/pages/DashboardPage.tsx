@@ -225,7 +225,7 @@ export default function DashboardPage({ user, onNavigate }: { user: AppUser; onN
         </div>
 
         {/* Row 1: Key metrics */}
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div className="dashboard-metrics-grid">
           <StatCard
             title="My calls today"
             value={metrics.callsToday}
@@ -260,7 +260,7 @@ export default function DashboardPage({ user, onNavigate }: { user: AppUser; onN
         </div>
 
         {/* Row 2: Charts */}
-        <div style={{ display: 'flex', gap: 16 }}>
+        <div className="dashboard-charts-row">
           <div className="card" style={{ flex: 2, minWidth: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Daily Calls (last {period} days)</div>
@@ -320,7 +320,7 @@ export default function DashboardPage({ user, onNavigate }: { user: AppUser; onN
         </div>
 
         {/* Row 3: Leaderboard + Tasks + Notes */}
-        <div style={{ display: 'flex', gap: 16 }}>
+        <div className="dashboard-cards-row">
           <LeaderboardCard data={metrics.leaderboard} />
 
           <div className="card" style={{ flex: 1, minWidth: 0 }}>

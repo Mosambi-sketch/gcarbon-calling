@@ -744,10 +744,93 @@ html, body {
 .priority-medium { color: #D97706; }
 .priority-low { color: #16A34A; }
 
-/* Responsive — mobile bottom tab bar */
+/* Responsive — mobile bottom tab bar & page layouts */
+.desktop-only-inactive {
+  display: contents;
+}
+.mobile-only-icon {
+  display: none;
+}
+
+/* Dashboard responsive layout classes */
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+.dashboard-charts-row,
+.dashboard-cards-row {
+  display: flex;
+  gap: 16px;
+}
+
+/* Kanban responsive layout */
+.kanban-board-container {
+  display: flex;
+  gap: 12px;
+  height: 100%;
+  align-items: flex-start;
+}
+
+/* Calendar responsive layout */
+.calendar-body-layout {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+}
+.calendar-day-sidebar {
+  width: 300px;
+  border-left: 1px solid var(--border);
+  padding: 18px;
+  overflow-y: auto;
+  flex-shrink: 0;
+  background-color: var(--surface-1);
+}
+
+/* Notes responsive layout */
+.notes-body-layout {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+.notes-sidebar {
+  width: 260px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.notes-editor-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.notes-mobile-back {
+  display: none !important;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-metrics-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
+  .desktop-only-inactive {
+    display: none !important;
+  }
+  .mobile-only-icon {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
   .app-layout {
     flex-direction: column;
+    height: 100dvh;
+    min-height: 100vh;
   }
   .fluid-sidebar {
     position: fixed;
@@ -760,42 +843,62 @@ html, body {
     margin: 0;
     z-index: 200;
     flex-direction: row;
+    background: #0B0B0B;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.45);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
+  .sidebar-fluid-svg,
+  .active-liquid-circle,
   .sidebar-svg-bg {
-    display: none;
+    display: none !important;
   }
   .sidebar-content {
     flex-direction: row;
-    padding: 6px 8px;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px));
     justify-content: space-around;
-    background: #0B0B0B;
+    background: transparent;
     border-radius: 0;
+    width: 100%;
   }
   [data-theme="dark"] .sidebar-content {
-    background: #111;
+    background: transparent;
   }
   .sidebar-logo-wrap,
   .sidebar-bottom-wrap,
   .sidebar-tooltip {
-    display: none;
+    display: none !important;
   }
   .sidebar-nav-list {
     flex-direction: row;
     gap: 0;
     justify-content: space-around;
+    width: 100%;
   }
   .fluid-nav-item {
     height: 44px;
     width: 44px;
     min-height: 44px;
+    border-radius: 50%;
   }
   .fluid-nav-item .icon-slot {
     width: 38px;
     height: 38px;
+    border-radius: 50%;
+    transition: all 0.18s ease;
+  }
+  .fluid-nav-item.is-active .icon-slot {
+    background: #FFFFFF !important;
+    color: #09090B !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  }
+  .fluid-nav-item.is-active svg {
+    stroke: #09090B !important;
   }
   .main-content {
-    padding: 8px 8px 64px 8px;
+    padding: 8px 8px calc(64px + env(safe-area-inset-bottom, 0px)) 8px;
     margin-left: 0;
+    height: 100%;
+    overflow: hidden;
   }
   .content-canvas {
     border-radius: 16px;
@@ -805,24 +908,82 @@ html, body {
     border-radius: 0;
   }
   .page-header {
-    padding: 16px 14px 12px;
+    padding: 14px 12px 10px;
     flex-wrap: wrap;
+    gap: 8px;
   }
   .header-actions {
     flex-wrap: wrap;
     gap: 6px;
   }
   .filter-bar {
-    padding: 8px 12px;
+    padding: 8px 10px;
   }
   .page-body {
-    padding: 16px 14px;
+    padding: 12px 10px;
   }
   .modal {
     border-radius: 16px;
-    padding: 20px;
-    max-width: calc(100vw - 32px);
-    max-height: 80vh;
+    padding: 18px;
+    max-width: calc(100vw - 24px);
+    max-height: 85vh;
+  }
+
+  /* Dashboard mobile */
+  .dashboard-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .dashboard-charts-row,
+  .dashboard-cards-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Tasks mobile */
+  .tasks-quick-add-form {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    padding: 10px 12px !important;
+  }
+  .kanban-board-container {
+    scroll-snap-type: x mandatory;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+  .kanban-board-container .kanban-column {
+    scroll-snap-align: start;
+    min-width: 82vw;
+    max-width: 85vw;
+  }
+
+  /* Calendar mobile */
+  .calendar-body-layout {
+    flex-direction: column;
+  }
+  .calendar-day-sidebar {
+    width: 100% !important;
+    border-left: none !important;
+    border-top: 1px solid var(--border);
+    padding: 14px !important;
+  }
+
+  /* Notes mobile */
+  .notes-mobile-back {
+    display: inline-flex !important;
+  }
+  .notes-sidebar.hide-on-mobile {
+    display: none !important;
+  }
+  .notes-editor-pane.hide-on-mobile {
+    display: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-metrics-grid {
+    grid-template-columns: 1fr;
   }
 }
 

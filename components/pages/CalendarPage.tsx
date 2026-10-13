@@ -304,9 +304,9 @@ export default function CalendarPage({ user }: { user: AppUser }) {
       </div>
 
       {/* Calendar Grid + Day Sidebar */}
-      <div style={{ flex: 1, overflow: 'auto', display: 'flex' }}>
+      <div className="calendar-body-layout">
         {/* Calendar grid */}
-        <div style={{ flex: 1, padding: 16, minWidth: 0 }}>
+        <div style={{ flex: 1, padding: 14, minWidth: 0 }}>
           {/* Day headers */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 4 }}>
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
@@ -375,7 +375,7 @@ export default function CalendarPage({ user }: { user: AppUser }) {
 
         {/* Selected Day Sidebar */}
         {selectedDate && (
-          <div style={{ width: 300, borderLeft: '1px solid var(--border)', padding: 18, overflowY: 'auto', flexShrink: 0, backgroundColor: 'var(--surface-1)' }}>
+          <div className="calendar-day-sidebar">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>
                 {format(selectedDate, 'EEEE, dd MMMM')}

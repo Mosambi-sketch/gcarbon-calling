@@ -259,8 +259,8 @@ export default function TasksPage({ user }: { user: AppUser }) {
       {/* Quick add */}
       <form
         onSubmit={handleAddTask}
+        className="tasks-quick-add-form"
         style={{
-          padding: '10px 20px',
           borderBottom: '1px solid var(--border)',
           display: 'flex',
           gap: 8,
@@ -272,7 +272,7 @@ export default function TasksPage({ user }: { user: AppUser }) {
           placeholder="+ Quick add task…"
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
-          style={{ flex: 1 }}
+          style={{ flex: '1 1 180px', minWidth: 140 }}
         />
         <div className="select-wrap">
           <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as Priority)}>
@@ -295,19 +295,19 @@ export default function TasksPage({ user }: { user: AppUser }) {
         <input
           type="date"
           className="input"
-          style={{ width: 140 }}
+          style={{ width: 135 }}
           value={newDue}
           onChange={(e) => setNewDue(e.target.value)}
         />
-        <button className="btn btn-primary" type="submit">
+        <button className="btn btn-primary" type="submit" style={{ minWidth: 64 }}>
           Add
         </button>
       </form>
 
       {/* Kanban / List view */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: 14 }}>
         {view === 'kanban' ? (
-          <div style={{ display: 'flex', gap: 12, height: '100%', alignItems: 'flex-start' }}>
+          <div className="kanban-board-container">
             {COLUMNS.map((col) => {
               const colTasks = tasks.filter((t) => t.status === col.id)
               return (

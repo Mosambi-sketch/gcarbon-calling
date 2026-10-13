@@ -855,8 +855,9 @@ export default function LogCallDrawer({
 
         {/* Action Footer */}
         <div style={{ 
-          padding: '16px 24px', borderTop: '1px solid var(--border)',
+          padding: '14px 16px calc(14px + env(safe-area-inset-bottom, 0px)) 16px', borderTop: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexWrap: 'wrap', gap: 10,
           background: 'var(--card)', flexShrink: 0 
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--text-muted)' }}>
