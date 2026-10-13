@@ -128,14 +128,12 @@ export default function App() {
 
       // Check cached user FIRST for instantaneous 0ms rendering
       const cached = getCachedUser()
-      if (cached) {
-        if (isAuthorizedEmployee(cached.email)) {
-          setUser(cached)
-          setLoading(false)
-        } else {
-          localStorage.removeItem('gc_current_user')
-          setUser(null)
-        }
+      if (cached && isAuthorizedEmployee(cached.email)) {
+        setUser(cached)
+        setLoading(false)
+      } else if (cached) {
+        localStorage.removeItem('gc_current_user')
+        setUser(null)
       }
 
       if (!isSupabaseReady) {
@@ -144,30 +142,63 @@ export default function App() {
         return
       }
 
+      // Handle OAuth PKCE code return if present
+      if (typeof window !== 'undefined' && window.location.search) {
+        const urlParams = new URLSearchParams(window.location.search)
+        const code = urlParams.get('code')
+        if (code) {
+          try {
+            const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+            if (exchangeData?.user) {
+              const appUser = await handleAuthSession(exchangeData.user)
+              if (appUser && !unmounted) {
+                setUser(appUser)
+                setLoading(false)
+              }
+            } else if (exchangeError) {
+              console.warn('OAuth code exchange notice:', exchangeError.message)
+            }
+            window.history.replaceState(null, '', window.location.pathname)
+          } catch (e) {
+            console.warn('exchangeCodeForSession notice:', e)
+          }
+        }
+      }
+
       try {
         const { data, error } = await supabase.auth.getSession()
         if (error) {
-          console.warn('Supabase getSession error:', error)
+          console.warn('Supabase getSession notice:', error)
         } else if (data?.session?.user) {
           const appUser = await handleAuthSession(data.session.user)
-          if (appUser && !unmounted) setUser(appUser)
+          if (appUser && !unmounted) {
+            setUser(appUser)
+            setLoading(false)
+          }
+          // Clean token hash if present
+          if (typeof window !== 'undefined' && window.location.hash?.includes('access_token')) {
+            window.history.replaceState(null, '', window.location.pathname)
+          }
         }
       } catch (e) {
         console.warn('Error checking Supabase session:', e)
       } finally {
-        if (!unmounted) setLoading(false)
+        if (!unmounted && !cached) setLoading(false)
         clearTimeout(safetyTimer)
       }
 
-      // Listen for auth state changes
+      // Listen for auth state changes (SIGNED_IN, TOKEN_REFRESHED, INITIAL_SESSION)
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (unmounted) return
-        if (event === 'SIGNED_OUT' || !session) {
+        if (event === 'SIGNED_OUT') {
           localStorage.removeItem('gc_current_user')
           setUser(null)
-        } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
+        } else if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
           const appUser = await handleAuthSession(session.user)
-          if (appUser && !unmounted) setUser(appUser)
+          if (appUser && !unmounted) {
+            setUser(appUser)
+            setLoading(false)
+          }
         }
       })
 

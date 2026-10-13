@@ -54,13 +54,21 @@ export async function getAppUserFromSupabaseUser(authUser: SupabaseUser): Promis
 }
 
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin,
-    },
-  })
-  return { error: error?.message ?? null }
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    })
+    if (error) return { error: error.message }
+    if (data?.url) {
+      window.location.href = data.url
+    }
+    return { error: null }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Google sign-in failed. Please try email login.' }
+  }
 }
 
 export async function signUpWithCompanyEmail(
