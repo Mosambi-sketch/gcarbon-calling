@@ -20,7 +20,7 @@ import type { AppUser } from './store'
 import { getCachedUser } from './db'
 import { supabase } from './supabase'
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api'
+export const API_BASE_URL = ((import.meta.env.VITE_API_URL as string) || '/api').replace(/\/+$/, '')
 
 async function request<T>(
   endpoint: string,
@@ -196,6 +196,11 @@ export const api = {
         body: JSON.stringify(updates),
       })
     },
+    async delete(id: string) {
+      return request<{ success: boolean; id: string }>(`/tasks/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+    },
   },
 
   // Notes
@@ -208,6 +213,11 @@ export const api = {
       return request<Note>('/notes', {
         method: 'POST',
         body: JSON.stringify(note),
+      })
+    },
+    async delete(id: string) {
+      return request<{ success: boolean; id: string }>(`/notes/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
       })
     },
   },

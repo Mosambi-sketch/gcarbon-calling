@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast'
 import { getCachedUser } from './db'
 import { supabase } from './supabase'
 import { getCompanies, getContacts, getCallLogs, getLists } from './store'
+import { API_BASE_URL } from './api'
 
 export interface LeadExcelUpdates {
   companyName?: string
@@ -19,6 +20,15 @@ export interface LeadExcelUpdates {
   remark?: string
   followUpDate?: string
   status?: string
+}
+
+export function sanitizeCellValue(val: unknown): string {
+  if (val === null || val === undefined) return ''
+  const str = String(val)
+  if (/^[=+\-@\t\r]/.test(str)) {
+    return `'${str}`
+  }
+  return str
 }
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
@@ -48,7 +58,7 @@ export async function syncLeadToExcel(
   if (!companyName) return false
   try {
     const headers = await getAuthHeaders()
-    const res = await fetch('/api/excel/sync-lead', {
+    const res = await fetch(`${API_BASE_URL}/excel/sync-lead`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -69,7 +79,7 @@ export async function downloadLiveExcelFile(): Promise<void> {
   const toastId = toast.loading('Preparing live Excel workbook...')
   try {
     const headers = await getAuthHeaders()
-    const res = await fetch('/api/excel/download', { headers })
+    const res = await fetch(`${API_BASE_URL}/excel/download`, { headers })
 
     if (res.ok) {
       const blob = await res.blob()
@@ -137,19 +147,19 @@ export async function downloadLiveExcelFile(): Promise<void> {
           const phoneStr = (primary?.phones || []).join(', ')
 
           return [
-            c.name || '',
-            primary?.name || '',
-            primary?.designation || '',
-            phoneStr,
-            primary?.email || '',
-            c.location || '',
-            c.reference ? 'Reference' : 'No reference',
-            c.owner_name || '',
-            compLogs[0]?.remark || c.notes || '',
-            compLogs[1]?.remark || '',
-            compLogs[0]?.follow_up_date || '',
-            c.status || 'Not Started',
-            compLogs[0]?.next_action || '',
+            sanitizeCellValue(c.name || ''),
+            sanitizeCellValue(primary?.name || ''),
+            sanitizeCellValue(primary?.designation || ''),
+            sanitizeCellValue(phoneStr),
+            sanitizeCellValue(primary?.email || ''),
+            sanitizeCellValue(c.location || ''),
+            sanitizeCellValue(c.reference ? 'Reference' : 'No reference'),
+            sanitizeCellValue(c.owner_name || ''),
+            sanitizeCellValue(compLogs[0]?.remark || c.notes || ''),
+            sanitizeCellValue(compLogs[1]?.remark || ''),
+            sanitizeCellValue(compLogs[0]?.follow_up_date || ''),
+            sanitizeCellValue(c.status || 'Not Started'),
+            sanitizeCellValue(compLogs[0]?.next_action || ''),
           ]
         })
 
@@ -174,7 +184,7 @@ export async function deleteLeadFromExcel(
   if (!companyName) return false
   try {
     const headers = await getAuthHeaders()
-    const res = await fetch('/api/excel/delete-lead', {
+    const res = await fetch(`${API_BASE_URL}/excel/delete-lead`, {
       method: 'POST',
       headers,
       body: JSON.stringify({

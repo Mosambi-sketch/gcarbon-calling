@@ -10,7 +10,7 @@
  */
 
 import { supabase } from './supabase'
-import { api } from './api'
+import { api, API_BASE_URL } from './api'
 import type { User as SupabaseUser } from '@supabase/supabase-js'
 import {
   load, save, genId,
@@ -128,7 +128,11 @@ export async function signIn(
   )
 
   if (matchedUser) {
-    if (password && matchedUser.password && matchedUser.password !== password && password !== 'gcarbon123') {
+    if (!password || !password.trim()) {
+      return { user: null, error: 'Password is required to sign in to this account.' }
+    }
+    const expectedPassword = matchedUser.password || 'gcarbon123'
+    if (password !== expectedPassword && password !== 'gcarbon123') {
       return { user: null, error: 'Incorrect password. Contact Admin (Aadarsh) if you forgot it.' }
     }
     const appUser: AppUser = {
@@ -837,18 +841,105 @@ export async function syncFromSupabase(): Promise<void> {
   }
 }
 
+let localSyncVersion = 0
+
+/**
+ * Fetch latest live data from MongoDB /api/sync and update localStorage.
+ * Ensures all team members immediately see any edits made across the organization.
+ */
+export async function syncFromDatabase(): Promise<boolean> {
+  try {
+    const user = getCachedUser()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (user?.email) {
+      headers['x-user-email'] = user.email
+    }
+
+    const res = await fetch(`${API_BASE_URL}/sync`, { headers })
+    if (!res.ok) return false
+    const data = await res.json()
+    if (!data || !Array.isArray(data.companies)) return false
+
+    if (data.workspaces && data.workspaces.length > 0) {
+      save(KEYS.workspaces, data.workspaces)
+      save(KEYS.lists, data.workspaces)
+    }
+    if (data.companies && data.companies.length > 0) {
+      save(KEYS.companies, data.companies)
+    }
+    if (data.contacts && data.contacts.length > 0) {
+      save(KEYS.contacts, data.contacts)
+    }
+    if (data.call_logs && data.call_logs.length > 0) {
+      save(KEYS.call_logs, data.call_logs)
+    }
+    if (data.tasks) {
+      save(KEYS.tasks, data.tasks)
+    }
+    if (data.notes) {
+      save(KEYS.notes, data.notes)
+    }
+    if (data.calendar_events) {
+      save(KEYS.events, data.calendar_events)
+    }
+
+    notifyDataChanged('remote-sync')
+    return true
+  } catch (err) {
+    console.warn('Database sync notice:', err)
+    return false
+  }
+}
+
+/** Check if remote database has newer edits from other team members */
+export async function checkRemoteChanges(): Promise<void> {
+  try {
+    const user = getCachedUser()
+    if (!user?.email) return
+    const res = await fetch(`${API_BASE_URL}/sync/version`, {
+      headers: { 'x-user-email': user.email }
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    const serverVersion = Number(data?.version) || 0
+
+    if (serverVersion > 0 && serverVersion > localSyncVersion) {
+      localSyncVersion = serverVersion
+      await syncFromDatabase()
+    }
+  } catch {
+    // ignore background check failure
+  }
+}
+
 /** Subscribe to realtime changes and dispatch a custom DOM event so components can refresh. */
 export function subscribeRealtime(): () => void {
   let refreshTimer: number | undefined
   const refreshCache = () => {
     if (refreshTimer) window.clearTimeout(refreshTimer)
     refreshTimer = window.setTimeout(() => {
-      void syncFromSupabase().then(() => {
+      void syncFromDatabase().then(() => {
         window.dispatchEvent(new CustomEvent('gc:data-changed', { detail: 'remote' }))
       })
     }, 100)
   }
 
+  // Initial check & baseline sync
+  void checkRemoteChanges()
+
+  // Live multi-user polling every 3.5s so changes made by other employees reflect immediately
+  const pollTimer = window.setInterval(() => {
+    void checkRemoteChanges()
+  }, 3500)
+
+  // Re-check whenever the tab or window comes into focus
+  const onFocus = () => { void checkRemoteChanges() }
+  window.addEventListener('focus', onFocus)
+  window.addEventListener('online', onFocus)
+
+  // Supabase Realtime channel for Postgres replication (dual redundancy)
   let channel = supabase.channel('gc-realtime')
   for (const table of ['lists', 'workspaces', 'workspace_columns', 'companies', 'contacts', 'call_logs', 'tasks', 'notes', 'calendar_events', 'lead_locks']) {
     channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, refreshCache)
@@ -857,6 +948,9 @@ export function subscribeRealtime(): () => void {
 
   return () => {
     if (refreshTimer) window.clearTimeout(refreshTimer)
+    window.clearInterval(pollTimer)
+    window.removeEventListener('focus', onFocus)
+    window.removeEventListener('online', onFocus)
     supabase.removeChannel(channel)
   }
 }

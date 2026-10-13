@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
+import { toast } from 'react-hot-toast'
 import type { AppUser } from '@/lib/store'
-import { subscribeRealtime, syncFromSupabase } from '@/lib/db'
+import { subscribeRealtime, syncFromSupabase, syncFromDatabase } from '@/lib/db'
+import { API_BASE_URL } from '@/lib/api'
 import { isSupabaseReady } from '@/lib/supabase'
 import Sidebar from './Sidebar'
 import DashboardPage from './pages/DashboardPage'
@@ -37,7 +39,7 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
 
     async function initData() {
       try {
-        await syncFromSupabase()
+        await Promise.allSettled([syncFromDatabase(), syncFromSupabase()])
       } catch (error) {
         console.error("Workspace sync completed with notice:", error)
       } finally {
@@ -55,12 +57,25 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
   useEffect(() => subscribeRealtime(), [])
 
 
-  // Re-render when Supabase realtime fires
+  // Re-render when data changed or mutation error occurs
   const [, forceUpdate] = useState(0)
   useEffect(() => {
     const handler = () => forceUpdate(n => n + 1)
+    const errHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.error) {
+        toast.error(`CRM sync notice: ${detail.action} - ${detail.error}`, {
+          id: `mut-${detail.action}`,
+          duration: 3500,
+        })
+      }
+    }
     window.addEventListener('gc:data-changed', handler)
-    return () => window.removeEventListener('gc:data-changed', handler)
+    window.addEventListener('gc:mutation-error', errHandler)
+    return () => {
+      window.removeEventListener('gc:data-changed', handler)
+      window.removeEventListener('gc:mutation-error', errHandler)
+    }
   }, [])
 
   // Keyboard shortcuts
@@ -89,7 +104,7 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
 
   useEffect(() => {
     const checkHealth = () => {
-      fetch('/api/health')
+      fetch(`${API_BASE_URL}/health`)
         .then(res => res.json())
         .then(data => {
           if (data?.mongodb) {

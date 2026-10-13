@@ -20,6 +20,16 @@ Promise.resolve(write()).then(({ error }) => {
   }).catch((error: unknown) => console.error(`Supabase ${label} failed:`, error))
 }
 
+export function reportMutationError(action: string, error: unknown): void {
+  const errMsg = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'error' in error ? String((error as any).error) : String(error)
+  console.error(`[CRM Mutation Failed] ${action}:`, errMsg)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('gc:mutation-error', {
+      detail: { action, error: errMsg }
+    }))
+  }
+}
+
 export { KEYS, load, save, genId }
 
 // ── Multi-Tab / Multi-Window Real-time Sync ──────────────────────────────────
@@ -85,14 +95,16 @@ export function normalizeEmail(email: string): string {
 export function isAuthorizedEmployee(email: string): boolean {
   if (!email || !email.trim()) return false
   const norm = normalizeEmail(email)
+  if (!norm.endsWith('@gcarbon.in') && !norm.endsWith('@gmail.com')) {
+    return false
+  }
   const allKnown = [...DEFAULT_USERS, ...DEMO_USERS]
   return allKnown.some(u => {
     const ue = normalizeEmail(u.email)
     return ue === norm ||
       ue.replace('@gmail.com', '@gcarbon.in') === norm ||
       ue.replace('@gcarbon.in', '@gmail.com') === norm ||
-      ue.split('@')[0] === norm.split('@')[0] ||
-      ue.split('@')[0].replace('.gcarbon', '').replace('114', '') === norm.split('@')[0].replace('.gcarbon', '').replace('114', '')
+      (norm.endsWith('@gcarbon.in') && ue.split('@')[0].replace('.gcarbon', '').replace('114', '') === norm.split('@')[0])
   })
 }
 
@@ -269,7 +281,9 @@ export function addCompany(data: Omit<Company, 'id' | 'created_at'>): Company {
   }
   save(KEYS.companies, [...companies, company])
   persistRemoteWrite('company upsert', () => supabase.from('companies').upsert(company, { onConflict: 'id' }))
-  void api.companies.save(company).catch(() => {})
+  api.companies.save(company).then(res => {
+    if (res.error) reportMutationError('Add Company', res.error)
+  }).catch(err => reportMutationError('Add Company', err))
   if (company.custom_fields && Object.keys(company.custom_fields).length > 0) {
     const list = getLists().find(item => item.id === company.list_id)
     setListColumns(company.list_id, [...(list?.columns || []), ...Object.keys(company.custom_fields)])
@@ -285,7 +299,9 @@ export function updateCompany(id: string, data: Partial<Company>): Company | nul
   companies[idx] = { ...companies[idx], ...data }
   save(KEYS.companies, companies)
   persistRemoteWrite('company update', () => supabase.from('companies').upsert(companies[idx], { onConflict: 'id' }))
-  void api.companies.update(id, data).catch(() => {})
+  api.companies.update(id, data).then(res => {
+    if (res.error) reportMutationError('Update Company', res.error)
+  }).catch(err => reportMutationError('Update Company', err))
   notifyDataChanged('update-company')
   return companies[idx]
 }
@@ -295,7 +311,9 @@ export function deleteCompany(id: string): void {
   save(KEYS.contacts, load<Contact>(KEYS.contacts).filter(c => c.company_id !== id))
   save(KEYS.call_logs, load<CallLog>(KEYS.call_logs).filter(l => l.company_id !== id))
   persistRemoteWrite('company delete', () => supabase.from('companies').delete().eq('id', id))
-  void api.companies.delete(id).catch(() => {})
+  api.companies.delete(id).then(res => {
+    if (res.error) reportMutationError('Delete Company', res.error)
+  }).catch(err => reportMutationError('Delete Company', err))
   notifyDataChanged('delete-company')
 }
 
@@ -336,7 +354,9 @@ export function addContact(data: Omit<Contact, 'id'>): Contact {
   const contact: Contact = { id: genId(), ...data }
   save(KEYS.contacts, [...contacts, contact])
   persistRemoteWrite('contact upsert', () => supabase.from('contacts').upsert(contact, { onConflict: 'id' }))
-  void api.contacts.save(contact).catch(() => {})
+  api.contacts.save(contact).then(res => {
+    if (res.error) reportMutationError('Add Contact', res.error)
+  }).catch(err => reportMutationError('Add Contact', err))
   notifyDataChanged('add-contact')
   return contact
 }
@@ -348,7 +368,9 @@ export function updateContact(id: string, data: Partial<Contact>): Contact | nul
   contacts[idx] = { ...contacts[idx], ...data }
   save(KEYS.contacts, contacts)
   persistRemoteWrite('contact update', () => supabase.from('contacts').upsert(contacts[idx], { onConflict: 'id' }))
-  void api.contacts.save(contacts[idx]).catch(() => {})
+  api.contacts.save(contacts[idx]).then(res => {
+    if (res.error) reportMutationError('Update Contact', res.error)
+  }).catch(err => reportMutationError('Update Contact', err))
   notifyDataChanged('update-contact')
   return contacts[idx]
 }
@@ -368,7 +390,9 @@ export function addCallLog(data: Omit<CallLog, 'id'>): CallLog {
   logs.push(log)
   save(KEYS.call_logs, logs)
   persistRemoteWrite('call log upsert', () => supabase.from('call_logs').upsert(log, { onConflict: 'id' }))
-  void api.calls.create(log).catch(() => {})
+  api.calls.create(log).then(res => {
+    if (res.error) reportMutationError('Log Call', res.error)
+  }).catch(err => reportMutationError('Log Call', err))
   
   // Update company status using derived logic
   const companies = load<Company>(KEYS.companies)
@@ -378,7 +402,9 @@ export function addCallLog(data: Omit<CallLog, 'id'>): CallLog {
     companies[compIdx].status = status
     save(KEYS.companies, companies)
     persistRemoteWrite('call status update', () => supabase.from('companies').upsert(companies[compIdx], { onConflict: 'id' }))
-    void api.companies.update(data.company_id, { status }).catch(() => {})
+    api.companies.update(data.company_id, { status }).then(res => {
+      if (res.error) reportMutationError('Update Company Status', res.error)
+    }).catch(err => reportMutationError('Update Company Status', err))
   }
 
   notifyDataChanged('add-call-log')
@@ -441,6 +467,9 @@ export function addTask(data: Omit<Task, 'id' | 'created_at'>): Task {
   }
   save(KEYS.tasks, [...tasks, task])
   persistRemoteWrite('task upsert', () => supabase.from('tasks').upsert(task, { onConflict: 'id' }))
+  api.tasks.save(task).then(res => {
+    if (res.error) reportMutationError('Add Task', res.error)
+  }).catch(err => reportMutationError('Add Task', err))
   notifyDataChanged('add-task')
   return task
 }
@@ -452,6 +481,9 @@ export function updateTask(id: string, data: Partial<Task>): Task | null {
   tasks[idx] = { ...tasks[idx], ...data }
   save(KEYS.tasks, tasks)
   persistRemoteWrite('task update', () => supabase.from('tasks').upsert(tasks[idx], { onConflict: 'id' }))
+  api.tasks.save(tasks[idx]).then(res => {
+    if (res.error) reportMutationError('Update Task', res.error)
+  }).catch(err => reportMutationError('Update Task', err))
   notifyDataChanged('update-task')
   return tasks[idx]
 }
@@ -459,6 +491,9 @@ export function updateTask(id: string, data: Partial<Task>): Task | null {
 export function deleteTask(id: string): void {
   save(KEYS.tasks, load<Task>(KEYS.tasks).filter(t => t.id !== id))
   persistRemoteWrite('task delete', () => supabase.from('tasks').delete().eq('id', id))
+  api.tasks.delete(id).then(res => {
+    if (res.error) reportMutationError('Delete Task', res.error)
+  }).catch(err => reportMutationError('Delete Task', err))
   notifyDataChanged('delete-task')
 }
 
@@ -482,6 +517,9 @@ export function addNote(data: Omit<Note, 'id' | 'updated_at'>): Note {
   }
   save(KEYS.notes, [...notes, note])
   persistRemoteWrite('note upsert', () => supabase.from('notes').upsert(note, { onConflict: 'id' }))
+  api.notes.save(note).then(res => {
+    if (res.error) reportMutationError('Add Note', res.error)
+  }).catch(err => reportMutationError('Add Note', err))
   notifyDataChanged('add-note')
   return note
 }
@@ -493,6 +531,9 @@ export function updateNote(id: string, data: Partial<Note>): Note | null {
   notes[idx] = { ...notes[idx], ...data, updated_at: new Date().toISOString() }
   save(KEYS.notes, notes)
   persistRemoteWrite('note update', () => supabase.from('notes').upsert(notes[idx], { onConflict: 'id' }))
+  api.notes.save(notes[idx]).then(res => {
+    if (res.error) reportMutationError('Update Note', res.error)
+  }).catch(err => reportMutationError('Update Note', err))
   notifyDataChanged('update-note')
   return notes[idx]
 }
@@ -500,6 +541,9 @@ export function updateNote(id: string, data: Partial<Note>): Note | null {
 export function deleteNote(id: string): void {
   save(KEYS.notes, load<Note>(KEYS.notes).filter(n => n.id !== id))
   persistRemoteWrite('note delete', () => supabase.from('notes').delete().eq('id', id))
+  api.notes.delete(id).then(res => {
+    if (res.error) reportMutationError('Delete Note', res.error)
+  }).catch(err => reportMutationError('Delete Note', err))
   notifyDataChanged('delete-note')
 }
 

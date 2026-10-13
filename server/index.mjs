@@ -44,12 +44,15 @@ const AUTHORIZED_COMPANY_EMPLOYEES = [
 function findAuthorizedEmployee(email) {
   if (!email) return null
   const norm = email.toLowerCase().trim()
+  if (!norm.endsWith('@gcarbon.in') && !norm.endsWith('@gmail.com')) {
+    return null
+  }
   return AUTHORIZED_COMPANY_EMPLOYEES.find(e => {
     const e1 = e.email.toLowerCase()
     const e2 = e.altEmail.toLowerCase()
     return norm === e1 || norm === e2 ||
-      norm.split('@')[0] === e1.split('@')[0] ||
-      norm.split('@')[0].replace('.gcarbon', '').replace('114', '') === e.name.toLowerCase()
+      (norm.endsWith('@gcarbon.in') && norm.split('@')[0] === e.name.toLowerCase()) ||
+      (norm.endsWith('@gcarbon.in') && norm.split('@')[0] === e1.split('@')[0])
   }) || null
 }
 
@@ -224,21 +227,37 @@ async function initializeDatabase() {
   }
 }
 
-// ── Health & Status Route (Public & Minimal) ──────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
+    mongodb: {
+      connected: isConnected,
+      uriConfigured: Boolean(MONGODB_URI),
+    },
   })
 })
 
 // ── Auth Endpoints ───────────────────────────────────────────────────────────
 app.get('/api/auth/users', requireAuth, async (req, res) => {
+  const isAdmin = req.user?.role === 'admin'
   if (supabaseAdmin) {
     const { data } = await supabaseAdmin.from('allowed_employees').select('email, name, role, color, avatar').eq('active', true)
-    return res.json(data || [])
+    const sanitized = (data || []).map(u => {
+      if (isAdmin || u.email?.toLowerCase() === req.user?.email?.toLowerCase()) {
+        return u
+      }
+      return { name: u.name, role: u.role, color: u.color, avatar: u.avatar }
+    })
+    return res.json(sanitized)
   }
-  res.json([])
+  const roster = AUTHORIZED_COMPANY_EMPLOYEES.map(u => {
+    if (isAdmin || u.email.toLowerCase() === req.user?.email?.toLowerCase() || u.altEmail.toLowerCase() === req.user?.email?.toLowerCase()) {
+      return { email: u.email, name: u.name, role: u.role, color: '#E8E8E8', avatar: '' }
+    }
+    return { name: u.name, role: u.role, color: '#E8E8E8', avatar: '' }
+  })
+  res.json(roster)
 })
 
 // ── Workspaces & Lists ───────────────────────────────────────────────────────
@@ -291,10 +310,40 @@ app.patch('/api/companies/:id', requireAuth, async (req, res) => {
   const updates = req.body
 
   if (isConnected && db) {
-    await db.collection('companies').updateOne(
-      { id },
-      { $set: updates }
-    )
+    const existing = await db.collection('companies').findOne({ id })
+    if (existing) {
+      if (
+        updates.expected_version !== undefined &&
+        existing.version !== undefined &&
+        Number(updates.expected_version) < Number(existing.version)
+      ) {
+        return res.status(409).json({
+          error: 'Conflict: This company was modified by another employee. Please refresh and review before saving.',
+          currentRecord: existing,
+        })
+      }
+      const newVersion = (Number(existing.version) || 1) + 1
+      const updatedFields = {
+        ...updates,
+        version: newVersion,
+        updated_at: new Date().toISOString(),
+      }
+      delete updatedFields.expected_version
+      await db.collection('companies').updateOne({ id }, { $set: updatedFields })
+      void touchDataVersion()
+      return res.json({ id, ...updatedFields })
+    } else {
+      const company = {
+        id,
+        ...updates,
+        version: 1,
+        updated_at: new Date().toISOString(),
+      }
+      delete company.expected_version
+      await db.collection('companies').updateOne({ id }, { $set: company }, { upsert: true })
+      void touchDataVersion()
+      return res.json(company)
+    }
   }
   res.json({ id, ...updates })
 })
@@ -316,7 +365,12 @@ app.post('/api/call-logs', requireAuth, async (req, res) => {
   log.called_at = log.called_at || new Date().toISOString()
 
   if (isConnected && db) {
-    await db.collection('call_logs').insertOne(log)
+    // Idempotent upsert by id: prevent duplicate logs on rapid retries or double-clicks
+    await db.collection('call_logs').updateOne(
+      { id: log.id },
+      { $set: log },
+      { upsert: true }
+    )
     // Update company status & owner
     if (log.company_id && log.outcome) {
       const statusMap = {
@@ -341,10 +395,12 @@ app.post('/api/call-logs', requireAuth, async (req, res) => {
             owner_name: log.caller_name,
             owner_id: log.caller_id,
             updated_at: new Date().toISOString(),
-          }
+          },
+          $inc: { version: 1 }
         }
       )
     }
+    void touchDataVersion()
   }
   res.json(log)
 })
@@ -388,6 +444,15 @@ app.patch('/api/tasks/:id', requireAuth, async (req, res) => {
   res.json({ id, ...updates })
 })
 
+app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  if (isConnected && db) {
+    await db.collection('tasks').deleteOne({ id })
+    void touchDataVersion()
+  }
+  res.json({ success: true, id })
+})
+
 // ── Notes ────────────────────────────────────────────────────────────────────
 app.get('/api/notes', requireAuth, async (req, res) => {
   const { owner_id } = req.query
@@ -412,6 +477,15 @@ app.post('/api/notes', requireAuth, async (req, res) => {
     )
   }
   res.json(note)
+})
+
+app.delete('/api/notes/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  if (isConnected && db) {
+    await db.collection('notes').deleteOne({ id })
+    void touchDataVersion()
+  }
+  res.json({ success: true, id })
 })
 
 // ── Calendar Events ──────────────────────────────────────────────────────────
@@ -663,6 +737,33 @@ app.get('/api/sync', requireAuth, async (req, res) => {
     })
   }
   res.json({ success: false, message: 'MongoDB not connected' })
+})
+
+let currentSyncVersion = Date.now()
+
+async function touchDataVersion() {
+  currentSyncVersion = Date.now()
+  if (db) {
+    try {
+      await db.collection('sync_meta').updateOne(
+        { id: 'global_version' },
+        { $set: { version: currentSyncVersion, updated_at: new Date().toISOString() } },
+        { upsert: true }
+      )
+    } catch {}
+  }
+}
+
+app.get('/api/sync/version', requireAuth, async (req, res) => {
+  if (db) {
+    try {
+      const meta = await db.collection('sync_meta').findOne({ id: 'global_version' })
+      if (meta?.version && meta.version > currentSyncVersion) {
+        currentSyncVersion = meta.version
+      }
+    } catch {}
+  }
+  res.json({ version: currentSyncVersion, timestamp: new Date().toISOString() })
 })
 
 // ── Live SharePoint Excel Sync ───────────────────────────────────────────────

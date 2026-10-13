@@ -59,12 +59,15 @@ const AUTHORIZED_COMPANY_EMPLOYEES = [
 function findAuthorizedEmployee(email) {
   if (!email) return null
   const norm = email.toLowerCase().trim()
+  if (!norm.endsWith('@gcarbon.in') && !norm.endsWith('@gmail.com')) {
+    return null
+  }
   return AUTHORIZED_COMPANY_EMPLOYEES.find(e => {
     const e1 = e.email.toLowerCase()
     const e2 = e.altEmail.toLowerCase()
     return norm === e1 || norm === e2 ||
-      norm.split('@')[0] === e1.split('@')[0] ||
-      norm.split('@')[0].replace('.gcarbon', '').replace('114', '') === e.name.toLowerCase()
+      (norm.endsWith('@gcarbon.in') && norm.split('@')[0] === e.name.toLowerCase()) ||
+      (norm.endsWith('@gcarbon.in') && norm.split('@')[0] === e1.split('@')[0])
   }) || null
 }
 
@@ -157,18 +160,69 @@ function requireAdmin(req, res, next) {
   next()
 }
 
-// ── Health ────────────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    mongodb: {
+      connected: isConnected,
+      uriConfigured: Boolean(MONGODB_URI),
+    },
+  })
+})
+
+// ── Real-Time Multi-User Sync Tracker ────────────────────────────────────────
+let currentSyncVersion = Date.now()
+
+async function touchDataVersion() {
+  currentSyncVersion = Date.now()
+  try {
+    const database = await getDb()
+    if (database) {
+      await database.collection('sync_meta').updateOne(
+        { id: 'global_version' },
+        { $set: { version: currentSyncVersion, updated_at: new Date().toISOString() } },
+        { upsert: true }
+      )
+    }
+  } catch (err) {
+    console.warn('[SyncMeta touch warn]:', err.message)
+  }
+}
+
+app.get('/api/sync/version', requireAuth, async (req, res) => {
+  try {
+    const database = await getDb()
+    if (database) {
+      const meta = await database.collection('sync_meta').findOne({ id: 'global_version' })
+      if (meta?.version && meta.version > currentSyncVersion) {
+        currentSyncVersion = meta.version
+      }
+    }
+  } catch {}
+  res.json({ version: currentSyncVersion, timestamp: new Date().toISOString() })
 })
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 app.get('/api/auth/users', requireAuth, async (req, res) => {
+  const isAdmin = req.user?.role === 'admin'
   if (supabaseAdmin) {
     const { data } = await supabaseAdmin.from('allowed_employees').select('email, name, role, color, avatar').eq('active', true)
-    return res.json(data || [])
+    const sanitized = (data || []).map(u => {
+      if (isAdmin || u.email?.toLowerCase() === req.user?.email?.toLowerCase()) {
+        return u
+      }
+      return { name: u.name, role: u.role, color: u.color, avatar: u.avatar }
+    })
+    return res.json(sanitized)
   }
-  res.json([])
+  const roster = AUTHORIZED_COMPANY_EMPLOYEES.map(u => {
+    if (isAdmin || u.email.toLowerCase() === req.user?.email?.toLowerCase() || u.altEmail.toLowerCase() === req.user?.email?.toLowerCase()) {
+      return { email: u.email, name: u.name, role: u.role, color: '#E8E8E8', avatar: '' }
+    }
+    return { name: u.name, role: u.role, color: '#E8E8E8', avatar: '' }
+  })
+  res.json(roster)
 })
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
@@ -188,6 +242,7 @@ app.post('/api/workspaces', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('workspaces').updateOne({ id: ws.id }, { $set: ws }, { upsert: true })
+    void touchDataVersion()
   }
   res.json(ws)
 })
@@ -198,6 +253,7 @@ app.patch('/api/workspaces/:id', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('workspaces').updateOne({ id }, { $set: updates })
+    void touchDataVersion()
   }
   res.json({ id, ...updates })
 })
@@ -210,6 +266,7 @@ app.delete('/api/workspaces/:id', requireAuth, requireAdmin, async (req, res) =>
       database.collection('workspaces').deleteOne({ id }),
       database.collection('companies').deleteMany({ list_id: id }),
     ])
+    void touchDataVersion()
   }
   res.json({ success: true, id })
 })
@@ -234,6 +291,7 @@ app.post('/api/companies', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('companies').updateOne({ id: company.id }, { $set: company }, { upsert: true })
+    void touchDataVersion()
   }
   res.json(company)
 })
@@ -243,7 +301,40 @@ app.patch('/api/companies/:id', requireAuth, async (req, res) => {
   const updates = req.body
   const database = await getDb()
   if (database) {
-    await database.collection('companies').updateOne({ id }, { $set: updates })
+    const existing = await database.collection('companies').findOne({ id })
+    if (existing) {
+      if (
+        updates.expected_version !== undefined &&
+        existing.version !== undefined &&
+        Number(updates.expected_version) < Number(existing.version)
+      ) {
+        return res.status(409).json({
+          error: 'Conflict: This company was modified by another employee. Please refresh and review before saving.',
+          currentRecord: existing,
+        })
+      }
+      const newVersion = (Number(existing.version) || 1) + 1
+      const updatedFields = {
+        ...updates,
+        version: newVersion,
+        updated_at: new Date().toISOString(),
+      }
+      delete updatedFields.expected_version
+      await database.collection('companies').updateOne({ id }, { $set: updatedFields })
+      void touchDataVersion()
+      return res.json({ id, ...updatedFields })
+    } else {
+      const company = {
+        id,
+        ...updates,
+        version: 1,
+        updated_at: new Date().toISOString(),
+      }
+      delete company.expected_version
+      await database.collection('companies').updateOne({ id }, { $set: company }, { upsert: true })
+      void touchDataVersion()
+      return res.json(company)
+    }
   }
   res.json({ id, ...updates })
 })
@@ -253,6 +344,7 @@ app.delete('/api/companies/:id', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('companies').deleteOne({ id })
+    void touchDataVersion()
   }
   res.json({ success: true, id })
 })
@@ -268,6 +360,7 @@ app.post('/api/companies/bulk', requireAuth, requireAdmin, async (req, res) => {
       { id: { $in: ids } },
       { $set: { ...updates, updated_at: new Date().toISOString() } }
     )
+    void touchDataVersion()
   }
   res.json({ success: true, updatedCount: ids.length })
 })
@@ -290,7 +383,12 @@ app.post('/api/call-logs', requireAuth, async (req, res) => {
   log.called_at = log.called_at || new Date().toISOString()
   const database = await getDb()
   if (database) {
-    await database.collection('call_logs').insertOne(log)
+    // Idempotent upsert by id: prevent duplicate logs on rapid retries or double-clicks
+    await database.collection('call_logs').updateOne(
+      { id: log.id },
+      { $set: log },
+      { upsert: true }
+    )
     if (log.company_id && log.outcome) {
       const statusMap = {
         'Not Called': 'Not Called',
@@ -308,9 +406,18 @@ app.post('/api/call-logs', requireAuth, async (req, res) => {
       const newStatus = statusMap[log.outcome] || 'Attempted'
       await database.collection('companies').updateOne(
         { id: log.company_id },
-        { $set: { status: newStatus, owner_name: log.caller_name, owner_id: log.caller_id, updated_at: new Date().toISOString() } }
+        {
+          $set: {
+            status: newStatus,
+            owner_name: log.caller_name,
+            owner_id: log.caller_id,
+            updated_at: new Date().toISOString(),
+          },
+          $inc: { version: 1 }
+        }
       )
     }
+    void touchDataVersion()
   }
   res.json(log)
 })
@@ -334,6 +441,7 @@ app.post('/api/tasks', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('tasks').updateOne({ id: task.id }, { $set: task }, { upsert: true })
+    void touchDataVersion()
   }
   res.json(task)
 })
@@ -344,8 +452,19 @@ app.patch('/api/tasks/:id', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('tasks').updateOne({ id }, { $set: updates })
+    void touchDataVersion()
   }
   res.json({ id, ...updates })
+})
+
+app.delete('/api/tasks/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const database = await getDb()
+  if (database) {
+    await database.collection('tasks').deleteOne({ id })
+    void touchDataVersion()
+  }
+  res.json({ success: true, id })
 })
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
@@ -367,8 +486,19 @@ app.post('/api/notes', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('notes').updateOne({ id: note.id }, { $set: note }, { upsert: true })
+    void touchDataVersion()
   }
   res.json(note)
+})
+
+app.delete('/api/notes/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const database = await getDb()
+  if (database) {
+    await database.collection('notes').deleteOne({ id })
+    void touchDataVersion()
+  }
+  res.json({ success: true, id })
 })
 
 // ── Calendar Events ──────────────────────────────────────────────────────────
@@ -389,6 +519,7 @@ app.post('/api/events', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('calendar_events').updateOne({ id: event.id }, { $set: event }, { upsert: true })
+    void touchDataVersion()
   }
   res.json(event)
 })
@@ -398,6 +529,7 @@ app.delete('/api/events/:id', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('calendar_events').deleteOne({ id })
+    void touchDataVersion()
   }
   res.json({ success: true, id })
 })
@@ -420,6 +552,7 @@ app.post('/api/contacts', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('contacts').updateOne({ id: contact.id }, { $set: contact }, { upsert: true })
+    void touchDataVersion()
   }
   res.json(contact)
 })
@@ -429,6 +562,7 @@ app.delete('/api/contacts/:id', requireAuth, async (req, res) => {
   const database = await getDb()
   if (database) {
     await database.collection('contacts').deleteOne({ id })
+    void touchDataVersion()
   }
   res.json({ success: true, id })
 })
@@ -600,6 +734,10 @@ app.post('/api/excel/sync-lead', requireAuth, async (req, res) => {
       }
     }
 
+    if (database) {
+      void touchDataVersion()
+    }
+
     res.json({
       success: true,
       updated: companyName || companyId,
@@ -623,6 +761,7 @@ app.post('/api/excel/delete-lead', requireAuth, async (req, res) => {
       await database.collection('companies').updateOne(compQuery, {
         $set: { archived: true, updated_at: new Date().toISOString() }
       })
+      void touchDataVersion()
     }
     res.json({ success: true })
   } catch (err) {
@@ -630,7 +769,16 @@ app.post('/api/excel/delete-lead', requireAuth, async (req, res) => {
   }
 })
 
-app.get('/api/excel/download', async (req, res) => {
+function sanitizeCellValue(val) {
+  if (val === null || val === undefined) return ''
+  const str = String(val)
+  if (/^[=+\-@\t\r]/.test(str)) {
+    return `'${str}`
+  }
+  return str
+}
+
+app.get('/api/excel/download', requireAuth, async (req, res) => {
   try {
     const database = await getDb()
     if (!database) {
@@ -693,19 +841,19 @@ app.get('/api/excel/download', async (req, res) => {
         const phoneStr = (primary?.phones || []).join(', ')
 
         return [
-          c.name || '',
-          primary?.name || '',
-          primary?.designation || '',
-          phoneStr,
-          primary?.email || '',
-          c.location || '',
-          c.reference ? 'Reference' : 'No reference',
-          c.owner_name || '',
-          compLogs[0]?.remark || c.notes || '',
-          compLogs[1]?.remark || '',
-          compLogs[0]?.follow_up_date || '',
-          c.status || 'Not Started',
-          compLogs[0]?.next_action || '',
+          sanitizeCellValue(c.name || ''),
+          sanitizeCellValue(primary?.name || ''),
+          sanitizeCellValue(primary?.designation || ''),
+          sanitizeCellValue(phoneStr),
+          sanitizeCellValue(primary?.email || ''),
+          sanitizeCellValue(c.location || ''),
+          sanitizeCellValue(c.reference ? 'Reference' : 'No reference'),
+          sanitizeCellValue(c.owner_name || ''),
+          sanitizeCellValue(compLogs[0]?.remark || c.notes || ''),
+          sanitizeCellValue(compLogs[1]?.remark || ''),
+          sanitizeCellValue(compLogs[0]?.follow_up_date || ''),
+          sanitizeCellValue(c.status || 'Not Started'),
+          sanitizeCellValue(compLogs[0]?.next_action || ''),
         ]
       })
 
@@ -727,7 +875,7 @@ app.get('/api/excel/download', async (req, res) => {
   }
 })
 
-app.get('/api/excel/status', async (req, res) => {
+app.get('/api/excel/status', requireAuth, async (req, res) => {
   try {
     const database = await getDb()
     const count = database ? await database.collection('companies').countDocuments({ archived: { $ne: true } }) : 0

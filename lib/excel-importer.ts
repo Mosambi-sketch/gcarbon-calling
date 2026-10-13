@@ -119,9 +119,9 @@ export function normalizeCompanyName(name: string): string {
  * Match caller name to team member
  */
 export function matchCaller(raw: string | undefined): string {
-  if (!raw) return 'Unknown'
+  if (!raw || !raw.trim()) return 'Unknown'
   const r = raw.trim().toLowerCase()
-  const team = ['ajinkya', 'himanshi', 'tamanna', 'kunal', 'ankesh']
+  const team = ['aadarsh', 'ajinkya', 'himanshi', 'tamanna', 'kunal', 'ankesh', 'naresh', 'pranita']
   for (const member of team) {
     if (r.includes(member)) return member.charAt(0).toUpperCase() + member.slice(1)
   }

@@ -4,25 +4,6 @@ import { isSupabaseReady } from '@/lib/supabase'
 import type { AppUser } from '@/lib/store'
 import { isAuthorizedEmployee } from '@/lib/store'
 
-interface QuickMember {
-  name: string
-  email: string
-  role: 'admin' | 'caller'
-  color: string
-  avatar: string
-}
-
-const TEAM_MEMBERS: QuickMember[] = [
-  { name: 'Aadarsh', email: 'aadarsh.gcarbon@gmail.com', role: 'admin', color: '#A7F3D0', avatar: '/avatars/aadarsh-face.jpg' },
-  { name: 'Tamanna', email: 'tamanna.gcarbon@gmail.com', role: 'caller', color: '#E8894F', avatar: '/avatars/tamanna-face.jpg' },
-  { name: 'Naresh', email: 'naresh.gcarbon@gmail.com', role: 'caller', color: '#FDE047', avatar: '/avatars/naresh-face.jpg' },
-  { name: 'Himanshi', email: 'himanshi.gcarbon@gmail.com', role: 'caller', color: '#F9E1D2', avatar: '/avatars/himanshi-face.jpg' },
-  { name: 'Kunal', email: 'kunal.gcarbon114@gmail.com', role: 'caller', color: '#C4B5FD', avatar: '/avatars/kunal-face.jpg' },
-  { name: 'Ankesh', email: 'ankesh.gcarbon@gmail.com', role: 'caller', color: '#93C5FD', avatar: '/avatars/ankesh-face.jpg' },
-  { name: 'Pranita', email: 'pranita.gcarbon@gmail.com', role: 'caller', color: '#F472B6', avatar: '/avatars/pranita-face.jpg' },
-  { name: 'Ajinkya', email: 'ajinkya.gcarbon@gmail.com', role: 'caller', color: '#D9F56B', avatar: '/avatars/ajinkya-face.png' },
-]
-
 export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: AppUser) => void; authError?: string }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -36,24 +17,6 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
     if (authError) setError(authError)
   }, [authError])
 
-  const handleQuickLogin = async (member: QuickMember) => {
-    setLoading(true)
-    setError('')
-    setNotice('')
-    try {
-      const result = await signIn(member.email, 'gcarbon123')
-      if (result.user) {
-        onLogin(result.user)
-      } else {
-        setError(result.error ?? 'Could not sign in.')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -62,6 +25,12 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
 
     if (!isAuthorizedEmployee(email)) {
       setError(`Access denied: "${email}" is not an authorized company employee. Only team members approved by Admin (Aadarsh) can log in.`)
+      setLoading(false)
+      return
+    }
+
+    if (!password || !password.trim()) {
+      setError('Please enter your account password.')
       setLoading(false)
       return
     }
@@ -91,11 +60,11 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
     try {
       const result = await signInWithGoogle()
       if (result.error) {
-        setError(`${result.error} (Tip: click your name above for instant 1-click access)`)
+        setError(result.error)
         setLoading(false)
       }
     } catch {
-      setError('Google Sign-In unavailable. Please click your profile above.')
+      setError('Google Sign-In unavailable. Please enter your email and password below.')
       setLoading(false)
     }
   }
@@ -199,96 +168,9 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
             <span>Restricted: Company employees only. Access managed by Admin (Aadarsh).</span>
           </div>
 
-          {/* 1-Click Team Member Sign In */}
-          <div style={{ marginBottom: 22 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
-                ⚡ One-Click Team Login
-              </span>
-              <span style={{ fontSize: 11, color: '#16A34A', fontWeight: 600, background: '#DCFCE7', padding: '2px 8px', borderRadius: 12 }}>
-                Instant Access
-              </span>
-            </div>
-            <p style={{ fontSize: 12, color: '#64748B', margin: '0 0 12px 0' }}>
-              Click your profile to log in immediately without passwords:
-            </p>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 8,
-            }}>
-              {TEAM_MEMBERS.map(member => (
-                <button
-                  key={member.email}
-                  type="button"
-                  onClick={() => handleQuickLogin(member)}
-                  disabled={loading}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    padding: '8px 4px',
-                    borderRadius: 12,
-                    background: '#F8FAFC',
-                    border: '1px solid #E2E8F0',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.15s ease',
-                    textAlign: 'center',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = '#16A34A'
-                    e.currentTarget.style.background = '#F0FDF4'
-                    e.currentTarget.style.transform = 'translateY(-2px)'
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = '#E2E8F0'
-                    e.currentTarget.style.background = '#F8FAFC'
-                    e.currentTarget.style.transform = 'translateY(0)'
-                  }}
-                  title={`Sign in as ${member.name} (${member.email})`}
-                >
-                  <div style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: '50%',
-                    background: member.color,
-                    overflow: 'hidden',
-                    marginBottom: 6,
-                    border: '2px solid #FFFFFF',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}>
-                    {member.avatar ? (
-                      <img
-                        src={member.avatar}
-                        alt={member.name}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        onError={e => {
-                          e.currentTarget.style.display = 'none'
-                        }}
-                      />
-                    ) : (
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
-                        {member.name.charAt(0)}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                    {member.name}
-                  </div>
-                  <div style={{ fontSize: 9, color: member.role === 'admin' ? '#7C3AED' : '#64748B', fontWeight: 600 }}>
-                    {member.role === 'admin' ? 'Admin' : 'Caller'}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0', color: '#94A3B8', fontSize: 11, fontWeight: 700 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0 16px', color: '#94A3B8', fontSize: 11, fontWeight: 700 }}>
             <div style={{ height: 1, background: '#E2E8F0', flex: 1 }} />
-            OR SIGN IN WITH GMAIL
+            SIGN IN TO YOUR GCARBON WORKSPACE
             <div style={{ height: 1, background: '#E2E8F0', flex: 1 }} />
           </div>
 
@@ -370,7 +252,7 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>
-                  Password <span style={{ fontWeight: 400, color: '#94A3B8' }}>(optional for team)</span>
+                  Password <span style={{ color: '#DC2626' }}>*</span>
                 </label>
                 {isSupabaseReady && mode === 'signin' && (
                   <button
@@ -389,8 +271,9 @@ export default function LoginPage({ onLogin, authError = '' }: { onLogin: (u: Ap
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter password (or leave blank)'}
-                  minLength={mode === 'signup' ? 8 : undefined}
+                  placeholder={mode === 'signup' ? 'At least 8 characters' : 'Enter your account password'}
+                  minLength={mode === 'signup' ? 8 : 1}
+                  required
                   style={{ paddingRight: 40 }}
                 />
                 <button

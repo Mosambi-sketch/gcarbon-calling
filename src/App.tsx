@@ -32,6 +32,16 @@ export default function App() {
       const email = (sessionUser.email ?? '').toLowerCase().trim()
       const normEmail = normalizeEmail(email)
 
+      if (!isAuthorizedEmployee(normEmail)) {
+        console.warn('Unauthorized login attempt:', email)
+        try {
+          await supabase.auth.signOut()
+        } catch {}
+        localStorage.removeItem('gc_current_user')
+        setAuthError(`Access denied: "${email}" is not an authorized company employee. Only team members approved by Admin (Aadarsh) can access the CRM.`)
+        return null
+      }
+
       // Match known team member roster
       const allKnown = [...DEFAULT_USERS, ...DEMO_USERS]
       const known = allKnown.find(u => {
@@ -39,7 +49,7 @@ export default function App() {
         return ue === normEmail ||
           ue.replace('@gmail.com', '@gcarbon.in') === normEmail ||
           ue.replace('@gcarbon.in', '@gmail.com') === normEmail ||
-          ue.split('@')[0] === normEmail.split('@')[0]
+          (normEmail.endsWith('@gcarbon.in') && ue.split('@')[0].replace('.gcarbon', '').replace('114', '') === normEmail.split('@')[0])
       })
 
       // Check cached user first
@@ -54,8 +64,8 @@ export default function App() {
       }
 
       // Try fetching profile from Supabase
+      let profile: any = null
       try {
-        let profile: any = null
         const { data: profileById } = await supabase
           .from('profiles')
           .select('*')
@@ -86,17 +96,6 @@ export default function App() {
         }
       } catch (err) {
         console.warn('Could not load profile from Supabase, creating fallback:', err)
-      }
-
-      // Reject any user who is not an authorized company employee
-      if (!known && !profile) {
-        console.warn('Unauthorized login attempt:', email)
-        try {
-          await supabase.auth.signOut()
-        } catch {}
-        localStorage.removeItem('gc_current_user')
-        setAuthError(`Access denied: "${email}" is not an authorized company employee. Only team members approved by Admin (Aadarsh) can access the CRM.`)
-        return null
       }
 
       // Build app user from profile or known roster
