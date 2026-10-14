@@ -7,12 +7,13 @@ import {
   addTask, addEvent, getUserByName, getUserById, getUsers,
   updateCompany, updateContact, updateCallLog, deleteCompany
 } from '@/lib/store'
-import type { Company, Contact, CallLog, OutcomeType } from '@/lib/types'
+import type { Company, Contact, CallLog, OutcomeType, LeadLock } from '@/lib/types'
 import { OUTCOMES, getStatusColor, getInitials, getAvatarColor, getAvatar } from '@/lib/types'
 import { format, addDays, isToday, isPast } from 'date-fns'
 import LogCallDrawer from '../LogCallDrawer'
 import toast from 'react-hot-toast'
 import { syncFromSupabase } from '@/lib/db'
+import { acquireLeadLock, releaseLeadLock, fetchActiveLocks } from '@/lib/workspace-db'
 import { Phone, MessageSquare, LayoutGrid, Table as TableIcon } from 'lucide-react'
 
 interface Row {
@@ -430,12 +431,51 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterCaller, setFilterCaller] = useState('')
   const [filterFollowUp, setFilterFollowUp] = useState('')
+  const [queueTab, setQueueTab] = useState<'all' | 'mine' | 'fresh'>('all')
+  const [activeLocks, setActiveLocks] = useState<Record<string, LeadLock>>({})
   const [selectedRow, setSelectedRow] = useState<Row | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [lists, setLists] = useState(getLists())
   const [users, setUsers] = useState(getUsers())
   const [loading, setLoading] = useState(true)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Periodically poll active locks so all 7-10 callers see live presence
+  useEffect(() => {
+    let mounted = true
+    const checkLocks = async () => {
+      try {
+        const locks = await fetchActiveLocks()
+        if (mounted) setActiveLocks(locks || {})
+      } catch {}
+    }
+    checkLocks()
+    const timer = setInterval(checkLocks, 10000)
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  const openRowDrawer = useCallback((row: Row) => {
+    const lock = activeLocks[row.company.id]
+    if (lock && lock.user_id !== user.id) {
+      toast(`${lock.user_name} is currently viewing/calling this company.`, {
+        icon: '🔒',
+        duration: 3000,
+      })
+    }
+    setSelectedRow(row)
+    setDrawerOpen(true)
+    acquireLeadLock(row.company.id, { id: user.id, name: user.name, color: user.color }).catch(() => {})
+  }, [activeLocks, user])
+
+  const closeRowDrawer = useCallback(() => {
+    if (selectedRow?.company?.id) {
+      releaseLeadLock(selectedRow.company.id, user.id).catch(() => {})
+    }
+    setDrawerOpen(false)
+  }, [selectedRow, user.id])
 
   // Mobile-first View mode toggle (Cards for mobile, Table for desktop)
   const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
@@ -612,6 +652,16 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
   const filtered = useMemo(() => {
     let result = rows
 
+    if (queueTab === 'mine') {
+      const myName = (user?.name || '').toLowerCase()
+      result = result.filter(r => 
+        (r.company.owner_name && r.company.owner_name.toLowerCase() === myName) ||
+        (r.lastLog?.caller_name && r.lastLog.caller_name.toLowerCase() === myName)
+      )
+    } else if (queueTab === 'fresh') {
+      result = result.filter(r => (!r.company.status || r.company.status === 'Not Called') && !r.company.owner_name)
+    }
+
     if (search) {
       const s = search.toLowerCase()
       result = result.filter(r => 
@@ -627,7 +677,11 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
     }
 
     if (filterCaller) {
-      result = result.filter(r => r.lastLog?.caller_name === filterCaller)
+      const fc = filterCaller.toLowerCase()
+      result = result.filter(r => 
+        (r.lastLog?.caller_name && r.lastLog.caller_name.toLowerCase() === fc) ||
+        (r.company.owner_name && r.company.owner_name.toLowerCase() === fc)
+      )
     }
 
     if (filterFollowUp === 'today') {
@@ -648,7 +702,19 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
     }
 
     return result
-  }, [rows, search, filterStatus, filterCaller, filterFollowUp])
+  }, [rows, search, filterStatus, filterCaller, filterFollowUp, queueTab, user?.name])
+
+  const myLeadsCount = useMemo(() => {
+    const myName = (user?.name || '').toLowerCase()
+    return rows.filter(r => 
+      (r.company.owner_name && r.company.owner_name.toLowerCase() === myName) ||
+      (r.lastLog?.caller_name && r.lastLog.caller_name.toLowerCase() === myName)
+    ).length
+  }, [rows, user?.name])
+
+  const freshLeadsCount = useMemo(() => {
+    return rows.filter(r => (!r.company.status || r.company.status === 'Not Called') && !r.company.owner_name).length
+  }, [rows])
 
   // ── High Performance Pagination (eliminates DOM freeze with 4,000+ companies) ──
   const [currentPage, setCurrentPage] = useState(1)
@@ -656,7 +722,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [search, filterStatus, filterCaller, filterFollowUp])
+  }, [search, filterStatus, filterCaller, filterFollowUp, queueTab])
 
   const totalPages = pageSize <= 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize))
   const paginatedRows = useMemo(() => {
@@ -672,8 +738,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
       (r.company.status === 'Follow-up Due' && r.lastLog?.follow_up_date === today)
     )
     if (next) {
-      setSelectedRow(next)
-      setDrawerOpen(true)
+      openRowDrawer(next)
     }
   }
 
@@ -710,7 +775,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
 
   const handleLogSaved = () => {
     loadData()
-    setDrawerOpen(false)
+    closeRowDrawer()
   }
 
   // ── Inline edit handlers ────────────────────────────────────────────
@@ -961,6 +1026,87 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
           </div>
         </div>
 
+        {/* Quick Queue Segment: All / My Leads / Fresh Uncalled */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          <button
+            type="button"
+            onClick={() => setQueueTab('all')}
+            style={{
+              padding: '5px 12px',
+              borderRadius: 20,
+              fontSize: 12,
+              fontWeight: 600,
+              border: '1px solid',
+              borderColor: queueTab === 'all' ? '#0F172A' : '#E2E8F0',
+              background: queueTab === 'all' ? '#0F172A' : '#FFFFFF',
+              color: queueTab === 'all' ? '#FFFFFF' : '#475569',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>📋 All Leads</span>
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: queueTab === 'all' ? 'rgba(255,255,255,0.2)' : '#F1F5F9', color: queueTab === 'all' ? '#FFF' : '#64748B' }}>
+              {rows.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setQueueTab('mine')}
+            style={{
+              padding: '5px 12px',
+              borderRadius: 20,
+              fontSize: 12,
+              fontWeight: 600,
+              border: '1px solid',
+              borderColor: queueTab === 'mine' ? '#16A34A' : '#E2E8F0',
+              background: queueTab === 'mine' ? '#16A34A' : '#FFFFFF',
+              color: queueTab === 'mine' ? '#FFFFFF' : '#166534',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>👤 My Leads ({user.name})</span>
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: queueTab === 'mine' ? 'rgba(255,255,255,0.25)' : '#DCFCE7', color: queueTab === 'mine' ? '#FFF' : '#166534', fontWeight: 700 }}>
+              {myLeadsCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setQueueTab('fresh')}
+            style={{
+              padding: '5px 12px',
+              borderRadius: 20,
+              fontSize: 12,
+              fontWeight: 600,
+              border: '1px solid',
+              borderColor: queueTab === 'fresh' ? '#2563EB' : '#E2E8F0',
+              background: queueTab === 'fresh' ? '#2563EB' : '#FFFFFF',
+              color: queueTab === 'fresh' ? '#FFFFFF' : '#1E40AF',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span>⚡ Fresh / Uncalled</span>
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 10, background: queueTab === 'fresh' ? 'rgba(255,255,255,0.25)' : '#DBEAFE', color: queueTab === 'fresh' ? '#FFF' : '#1E40AF', fontWeight: 700 }}>
+              {freshLeadsCount}
+            </span>
+          </button>
+        </div>
+
         {/* List tabs */}
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
           <button
@@ -1169,7 +1315,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
-                        onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
+                        onClick={() => openRowDrawer(row)}
                         style={{
                           fontWeight: 700,
                           fontSize: 16,
@@ -1178,9 +1324,30 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                           lineHeight: 1.3,
                           marginBottom: 4,
                           letterSpacing: '-0.01em',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          flexWrap: 'wrap'
                         }}
                       >
-                        {row.company.name}
+                        <span>{row.company.name}</span>
+                        {activeLocks[row.company.id] && activeLocks[row.company.id].user_id !== user.id && (
+                          <span style={{
+                            fontSize: 10,
+                            padding: '2px 7px',
+                            borderRadius: 10,
+                            background: '#FEE2E2',
+                            color: '#DC2626',
+                            border: '1px solid #FECACA',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#DC2626' }} />
+                            {activeLocks[row.company.id].user_name} Calling
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                         <span style={{ fontSize: 11, color: '#6B7280', background: 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 6, fontWeight: 500 }}>
@@ -1253,10 +1420,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                     <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
                       <a
                         href={`tel:${phone}`}
-                        onClick={() => {
-                          setSelectedRow(row)
-                          setDrawerOpen(true)
-                        }}
+                        onClick={() => openRowDrawer(row)}
                         className="mobile-call-btn"
                         style={{ flex: 2 }}
                         title="1-Tap Call: Initiates phone dialer and opens Log Call notes"
@@ -1344,7 +1508,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                     <button
                       type="button"
                       className="btn btn-sm"
-                      onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
+                      onClick={() => openRowDrawer(row)}
                       style={{
                         background: '#0B0B0B',
                         color: '#FFFFFF',
@@ -1411,16 +1575,36 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                   <tr
                     key={row.company.id}
                     className={`${isOverdue ? 'overdue-row' : isDueToday ? 'followup-today-row' : row.company.status === 'Meeting Set' ? 'meeting-set-row' : ''}`}
-                    onClick={() => { setSelectedRow(row); setDrawerOpen(true) }}
+                    onClick={() => openRowDrawer(row)}
                     style={{ cursor: 'pointer' }}
                   >
                     {/* Company name — editable */}
                     <td onClick={e => e.stopPropagation()}>
-                      <EditableCell
-                        value={row.company.name}
-                        onSave={val => handleUpdateCompany(row.company.id, 'name', val)}
-                        style={{ fontWeight: 600, fontSize: 13 }}
-                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <EditableCell
+                          value={row.company.name}
+                          onSave={val => handleUpdateCompany(row.company.id, 'name', val)}
+                          style={{ fontWeight: 600, fontSize: 13 }}
+                        />
+                        {activeLocks[row.company.id] && activeLocks[row.company.id].user_id !== user.id && (
+                          <span style={{
+                            fontSize: 9,
+                            padding: '1px 6px',
+                            borderRadius: 10,
+                            background: '#FEE2E2',
+                            color: '#DC2626',
+                            border: '1px solid #FECACA',
+                            fontWeight: 700,
+                            whiteSpace: 'nowrap',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3
+                          }}>
+                            <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#DC2626' }} />
+                            {activeLocks[row.company.id].user_name}
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 11, color: '#888', paddingLeft: 6 }}>{row.company.list_id.replace(/-/g, ' ')}</div>
                     </td>
 
@@ -1472,8 +1656,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                             href={`tel:${row.primaryContact.phones[0]}`}
                             onClick={e => {
                               e.stopPropagation()
-                              setSelectedRow(row)
-                              setDrawerOpen(true)
+                              openRowDrawer(row)
                             }}
                             style={{
                               display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -1617,7 +1800,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
                             e.currentTarget.style.background = '#0B0B0B'
                             e.currentTarget.style.color = '#FFFFFF'
                           }}
-                          onClick={e => { e.stopPropagation(); setSelectedRow(row); setDrawerOpen(true) }}
+                          onClick={e => { e.stopPropagation(); openRowDrawer(row) }}
                           title="Log call (L)"
                         >
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
@@ -1865,7 +2048,7 @@ export default function CallingSheetPage({ user }: { user: AppUser }) {
         <LogCallDrawer
           row={selectedRow}
           user={user}
-          onClose={() => setDrawerOpen(false)}
+          onClose={closeRowDrawer}
           onSaved={handleLogSaved}
         />
       )}

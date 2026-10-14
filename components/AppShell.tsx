@@ -64,10 +64,16 @@ export default function AppShell({ user, onLogout }: AppShellProps) {
     const errHandler = (e: Event) => {
       const detail = (e as CustomEvent).detail
       if (detail?.error) {
-        toast.error(`CRM sync notice: ${detail.action} - ${detail.error}`, {
-          id: `mut-${detail.action}`,
-          duration: 3500,
-        })
+        const isConflict = String(detail.error).toLowerCase().includes('conflict')
+        if (isConflict) {
+          toast('Record updated concurrently by another teammate.', {
+            icon: '⚠️',
+            id: `mut-${detail.action}`,
+            duration: 3500,
+          })
+        } else {
+          console.warn(`[CRM Sync Warning] ${detail.action}:`, detail.error)
+        }
       }
     }
     window.addEventListener('gc:data-changed', handler)

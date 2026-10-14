@@ -368,7 +368,7 @@ export function updateContact(id: string, data: Partial<Contact>): Contact | nul
   contacts[idx] = { ...contacts[idx], ...data }
   save(KEYS.contacts, contacts)
   persistRemoteWrite('contact update', () => supabase.from('contacts').upsert(contacts[idx], { onConflict: 'id' }))
-  api.contacts.save(contacts[idx]).then(res => {
+  api.contacts.update(id, data).then(res => {
     if (res.error) reportMutationError('Update Contact', res.error)
   }).catch(err => reportMutationError('Update Contact', err))
   notifyDataChanged('update-contact')
@@ -531,7 +531,7 @@ export function updateNote(id: string, data: Partial<Note>): Note | null {
   notes[idx] = { ...notes[idx], ...data, updated_at: new Date().toISOString() }
   save(KEYS.notes, notes)
   persistRemoteWrite('note update', () => supabase.from('notes').upsert(notes[idx], { onConflict: 'id' }))
-  api.notes.save(notes[idx]).then(res => {
+  api.notes.update(id, data).then(res => {
     if (res.error) reportMutationError('Update Note', res.error)
   }).catch(err => reportMutationError('Update Note', err))
   notifyDataChanged('update-note')

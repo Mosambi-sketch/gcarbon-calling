@@ -21,25 +21,36 @@ app.use(express.json({ limit: '50mb' }))
 // ── MongoDB Singleton Connection (reused across invocations) ─────────────────
 let mongoClient = null
 let db = null
-let isConnected = false
 
 async function getDb() {
-  if (isConnected && db) return db
+  if (db && mongoClient) {
+    try {
+      await db.command({ ping: 1 })
+      return db
+    } catch {
+      console.warn('[MongoDB] Reconnecting after stale connection...')
+      mongoClient = null
+      db = null
+    }
+  }
   if (!MONGODB_URI) {
     console.warn('[MongoDB] No MONGODB_URI configured')
     return null
   }
   try {
     mongoClient = new MongoClient(MONGODB_URI, {
-      maxPoolSize: 5,
-      serverSelectionTimeoutMS: 5000,
+      maxPoolSize: 20,
+      minPoolSize: 2,
+      serverSelectionTimeoutMS: 6000,
+      connectTimeoutMS: 10000,
     })
     await mongoClient.connect()
     db = mongoClient.db(process.env.MONGODB_DB_NAME || 'gcarbon_calling')
-    isConnected = true
     return db
   } catch (err) {
     console.error('[MongoDB] Connection error:', err.message)
+    mongoClient = null
+    db = null
     return null
   }
 }
@@ -491,6 +502,18 @@ app.post('/api/notes', requireAuth, async (req, res) => {
   res.json(note)
 })
 
+app.patch('/api/notes/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const updates = req.body
+  updates.updated_at = new Date().toISOString()
+  const database = await getDb()
+  if (database) {
+    await database.collection('notes').updateOne({ id }, { $set: updates }, { upsert: true })
+    void touchDataVersion()
+  }
+  res.json({ id, ...updates })
+})
+
 app.delete('/api/notes/:id', requireAuth, async (req, res) => {
   const { id } = req.params
   const database = await getDb()
@@ -555,6 +578,17 @@ app.post('/api/contacts', requireAuth, async (req, res) => {
     void touchDataVersion()
   }
   res.json(contact)
+})
+
+app.patch('/api/contacts/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const updates = req.body
+  const database = await getDb()
+  if (database) {
+    await database.collection('contacts').updateOne({ id }, { $set: updates }, { upsert: true })
+    void touchDataVersion()
+  }
+  res.json({ id, ...updates })
 })
 
 app.delete('/api/contacts/:id', requireAuth, async (req, res) => {

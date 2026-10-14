@@ -157,6 +157,12 @@ export const api = {
         body: JSON.stringify(contact),
       })
     },
+    async update(id: string, updates: Partial<Contact>) {
+      return request<Contact>(`/contacts/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      })
+    },
     async delete(id: string) {
       return request<{ success: boolean; id: string }>(`/contacts/${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -213,6 +219,12 @@ export const api = {
       return request<Note>('/notes', {
         method: 'POST',
         body: JSON.stringify(note),
+      })
+    },
+    async update(id: string, updates: Partial<Note>) {
+      return request<Note>(`/notes/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
       })
     },
     async delete(id: string) {

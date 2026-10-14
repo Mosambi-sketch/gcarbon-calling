@@ -475,8 +475,24 @@ app.post('/api/notes', requireAuth, async (req, res) => {
       { $set: note },
       { upsert: true }
     )
+    void touchDataVersion()
   }
   res.json(note)
+})
+
+app.patch('/api/notes/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const updates = req.body
+  updates.updated_at = new Date().toISOString()
+  if (isConnected && db) {
+    await db.collection('notes').updateOne(
+      { id },
+      { $set: updates },
+      { upsert: true }
+    )
+    void touchDataVersion()
+  }
+  res.json({ id, ...updates })
 })
 
 app.delete('/api/notes/:id', requireAuth, async (req, res) => {
@@ -542,8 +558,23 @@ app.post('/api/contacts', requireAuth, async (req, res) => {
       { $set: contact },
       { upsert: true }
     )
+    void touchDataVersion()
   }
   res.json(contact)
+})
+
+app.patch('/api/contacts/:id', requireAuth, async (req, res) => {
+  const { id } = req.params
+  const updates = req.body
+  if (isConnected && db) {
+    await db.collection('contacts').updateOne(
+      { id },
+      { $set: updates },
+      { upsert: true }
+    )
+    void touchDataVersion()
+  }
+  res.json({ id, ...updates })
 })
 
 app.delete('/api/contacts/:id', requireAuth, async (req, res) => {
